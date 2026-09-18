@@ -61,8 +61,17 @@ Save-Hr7State -State $state -StatePath $statePath
 }
 else {
     $state = Get-Hr7State -StatePath $statePath
-    if ($state.cygwin_root -ne $cygwinRoot -or $state.device_before.instance_id -ne $devices[0].InstanceId) {
-        throw 'Resume state does not match this runtime and connected scanner.'
+    if (-not ([string]$state.cygwin_root).Equals([string]$cygwinRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Resume state does not match this runtime.'
+    }
+    $sameDeviceInstance = ([string]$state.device_before.instance_id).Equals([string]$devices[0].InstanceId, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $sameDeviceInstance -and -not $SkipDriverBinding) {
+        throw 'The HR7 is present at a different USB port instance. Reconnect to its previous port or resume with driver binding explicitly skipped.'
+    }
+    if (-not $sameDeviceInstance) {
+        $state | Add-Member -Force -NotePropertyName resume_device_instance -NotePropertyValue (Get-Hr7DriverSnapshot -Device $devices[0])
+        Save-Hr7State -State $state -StatePath $statePath
+        Write-Hr7Log -LogPath $installLog -Message 'The supported HR7 is enumerated at a new USB port instance; its original driver snapshot is preserved and this resume explicitly skips USB rebinding.'
     }
 }
 
@@ -100,7 +109,7 @@ $bashPath = Join-Path $cygwinRoot 'bin\bash.exe'
 if (-not (Test-Path -LiteralPath $bashPath -PathType Leaf)) {
     throw "Cygwin bash was not installed at $bashPath"
 }
-$cygwinPackageStatus = & $bashPath -lc 'uname -sr; cygcheck -c cygwin bash coreutils tar gzip make gcc-core pkg-config autoconf automake libtool libusb1.0-devel libjpeg-devel libpng-devel libtiff-devel zlib-devel libgtk2.0-devel liblcms2-devel gettext-devel xinit xorg-server xhost xterm dbus-x11' 2>&1
+$cygwinPackageStatus = & $bashPath -lc 'uname -sr; cygcheck -c cygwin bash cygrunsrv coreutils tar gzip make gcc-core pkg-config autoconf automake libtool libusb1.0-devel libjpeg-devel libpng-devel libtiff-devel zlib-devel libgtk2.0-devel liblcms2-devel gettext-devel xinit xorg-server xhost xterm dbus-x11' 2>&1
 if ($LASTEXITCODE -ne 0) {
     throw "Could not record the installed Cygwin package versions. Exit code: $LASTEXITCODE"
 }
@@ -111,21 +120,27 @@ $xsane = Get-Hr7Artifact -Manifest $manifest -Id 'xsane'
 $saneTarball = Get-Hr7VerifiedDownload -Uri $sane.url -Destination (Join-Path $sourcesDirectory 'backends-1.4.0.tar.gz') -ExpectedSha256 $sane.sha256
 $xsaneTarball = Get-Hr7VerifiedDownload -Uri $xsane.url -Destination (Join-Path $sourcesDirectory 'xsane-0.999.tar.gz') -ExpectedSha256 $xsane.sha256
 
+$saneConfigSource = Join-Path $PSScriptRoot 'config\sane.d'
+$cygwinSaneConfigSource = ConvertTo-Hr7CygwinPath -BashPath $bashPath -WindowsPath $saneConfigSource
 $cygwinBuild = ConvertTo-Hr7CygwinPath -BashPath $bashPath -WindowsPath (Join-Path $PSScriptRoot 'build-cygwin.sh')
 $cygwinSane = ConvertTo-Hr7CygwinPath -BashPath $bashPath -WindowsPath $saneTarball
 $cygwinXsane = ConvertTo-Hr7CygwinPath -BashPath $bashPath -WindowsPath $xsaneTarball
 $buildLog = Join-Path $logsDirectory 'build-cygwin.log'
 Write-Hr7Log -LogPath $installLog -Message 'Building SANE 1.4.0 with BACKENDS=plustek and XSane 0.999.'
-& $bashPath -lc 'exec bash "$@" 2>&1' bash $cygwinBuild $cygwinSane $cygwinXsane '/opt/genius-hr7' | Tee-Object -FilePath $buildLog
+& $bashPath -lc 'exec bash "$@" 2>&1' bash $cygwinBuild $cygwinSane $cygwinXsane '/opt/genius-hr7' $cygwinSaneConfigSource | Tee-Object -FilePath $buildLog
 if ($LASTEXITCODE -ne 0) {
     throw "The SANE/XSane build failed. See $buildLog"
 }
 
 $scanimagePath = Join-Path $cygwinRoot 'opt\genius-hr7\bin\scanimage.exe'
 $xsanePath = Join-Path $cygwinRoot 'opt\genius-hr7\bin\xsane.exe'
-if (-not (Test-Path -LiteralPath $scanimagePath) -or -not (Test-Path -LiteralPath $xsanePath)) {
-    throw 'The expected private SANE or XSane executable was not produced.'
+$sanedPath = Join-Path $cygwinRoot 'opt\genius-hr7\sbin\saned.exe'
+if (-not (Test-Path -LiteralPath $scanimagePath) -or -not (Test-Path -LiteralPath $xsanePath) -or -not (Test-Path -LiteralPath $sanedPath)) {
+    throw 'The expected private SANE, XSane, or saned executable was not produced.'
 }
+
+$serviceScript = Join-Path $PSScriptRoot 'Configure-Sane-Service.ps1'
+& $serviceScript -Action Install -StateDirectory $stateDirectory -CygwinRoot $cygwinRoot
 
 $launcher = Join-Path $PSScriptRoot 'Launch-XSane.ps1'
 $shortcutPath = Join-Path $env:PUBLIC 'Desktop\Genius ColorPage HR7 Scan.lnk'
@@ -146,6 +161,7 @@ $state | Add-Member -Force -NotePropertyName sources -NotePropertyValue @(
 )
 $state | Add-Member -Force -NotePropertyName cygwin_package_versions -NotePropertyValue @($cygwinPackageStatus)
 $state | Add-Member -Force -NotePropertyName shortcut -NotePropertyValue $shortcutPath
+$state | Add-Member -Force -NotePropertyName sane_service -NotePropertyValue ([ordered]@{ name = 'GeniusColorPage-HR7-SANE'; bind = '127.0.0.1'; port = 6566; automatic = $true })
 Save-Hr7State -State $state -StatePath $statePath
 Write-Hr7Log -LogPath $installLog -Message "Installation completed. Use $shortcutPath and then run Diagnose-Windows.ps1."
 Write-Host 'Instalação concluída. Execute Diagnose-Windows.ps1 antes da primeira digitalização.'

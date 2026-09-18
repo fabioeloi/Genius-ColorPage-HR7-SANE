@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 3 ]; then
-  echo "Usage: build-cygwin.sh SANE_TARBALL XSANE_TARBALL PREFIX" >&2
+if [ "$#" -ne 4 ]; then
+  echo "Usage: build-cygwin.sh SANE_TARBALL XSANE_TARBALL PREFIX CONFIG_DIR" >&2
   exit 64
 fi
 
 sane_tar="$1"
 xsane_tar="$2"
 prefix="$3"
+config_source="$4"
 work_dir="$(dirname "$sane_tar")/build-1.4.0-0.999"
 config_dir="$prefix/etc/sane.d"
 
@@ -77,20 +78,27 @@ if [[ "$(uname -s)" == CYGWIN* ]]; then
   if grep -q '^#ifdef WIN32$' sanei/sanei_scsi.c; then
     sed -i '1588s/^#ifdef WIN32$/#if defined(WIN32) \&\& !defined(__CYGWIN__)/' sanei/sanei_scsi.c
   fi
+  if ! grep -q 'HR7 Cygwin USB-only SCSI guard' sanei/sanei_scsi.c; then
+    sed -i '/^#ifndef USE$/i\
+/* HR7 Cygwin USB-only SCSI guard */\
+#ifdef __CYGWIN__\
+# undef USE\
+#endif' sanei/sanei_scsi.c
+  fi
 fi
 make
 make install
 
+for config_file in dll.conf plustek.conf saned.conf; do
+  if [ ! -f "$config_source/$config_file" ]; then
+    echo "Required SANE configuration is missing: $config_source/$config_file" >&2
+    exit 67
+  fi
+done
 mkdir -p "$config_dir"
-cat > "$config_dir/dll.conf" <<'EOF'
-# Private configuration installed by Genius ColorPage-HR7 SANE.
-plustek
-EOF
-cat > "$config_dir/plustek.conf" <<'EOF'
-# Genius ColorPage HR7 only.
-[usb] 0x0458 0x2013
-device auto
-EOF
+install -m 0644 "$config_source/dll.conf" "$config_dir/dll.conf"
+install -m 0644 "$config_source/plustek.conf" "$config_dir/plustek.conf"
+install -m 0644 "$config_source/saned.conf" "$config_dir/saned.conf"
 
 cd "$xsane_src"
 sed -i 's/png_ptr->jmpbuf/png_jmpbuf(png_ptr)/g' src/xsane-save.c
@@ -117,4 +125,4 @@ EOF
 chmod 0755 "$prefix/bin/launch-xsane.sh"
 
 "$prefix/bin/scanimage" -V
-echo "Build completed: backend plustek only, private config at $config_dir"
+echo "Build completed: backend plustek only; SANE and saned configuration at $config_dir"

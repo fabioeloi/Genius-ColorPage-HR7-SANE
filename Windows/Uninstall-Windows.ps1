@@ -16,6 +16,9 @@ if (-not $cygwinRoot.StartsWith($fullStateDirectory + [IO.Path]::DirectorySepara
     throw "Refusing to delete runtime outside its state directory: $cygwinRoot"
 }
 
+$serviceScript = Join-Path $PSScriptRoot 'Configure-Sane-Service.ps1'
+& $serviceScript -Action Remove -StateDirectory $StateDirectory -CygwinRoot $cygwinRoot
+
 $ownedXsane = Get-CimInstance -ClassName Win32_Process | Where-Object {
     $_.Name -ieq 'xsane.exe' -and $_.CommandLine -match 'genius-hr7'
 }

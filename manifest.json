@@ -34,6 +34,30 @@
       "verification": "SHA-256 and Valid Authenticode signature in Configure-HR7-Driver.ps1"
     },
     {
+      "id": "sanewinds-x64",
+      "version": "1.6.9221",
+      "url": "https://sourceforge.net/projects/sanewinds/files/SANEWinDS_1.6.9221_x64.msi/download",
+      "sha256": "b6c7ce547be29e18bda6725f2ec50c7a356cd44bee64c4d5795f7a8c2ae71295",
+      "architecture": "x64",
+      "authenticode_status": "NotSigned",
+      "license": "GPL-3.0-only",
+      "source_url": "https://sourceforge.net/p/sanewinds/code/ci/6b6a9f3dada85372e3795b21dad6ccec65d9e8ee/tree/",
+      "source_revision": "6b6a9f3dada85372e3795b21dad6ccec65d9e8ee",
+      "verification": "SHA-256 captured from the official SourceForge HTTPS release asset; MSI is not Authenticode-signed; corresponding source revision and notices must accompany redistribution"
+    },
+    {
+      "id": "sanewinds-x86",
+      "version": "1.6.9221",
+      "url": "https://sourceforge.net/projects/sanewinds/files/SANEWinDS_1.6.9221_x86.msi/download",
+      "sha256": "4242a429574c1b4b95707e2164c4e01030ffe0803040e2dcfda64e381856c5c3",
+      "architecture": "x86",
+      "authenticode_status": "NotSigned",
+      "license": "GPL-3.0-only",
+      "source_url": "https://sourceforge.net/p/sanewinds/code/ci/6b6a9f3dada85372e3795b21dad6ccec65d9e8ee/tree/",
+      "source_revision": "6b6a9f3dada85372e3795b21dad6ccec65d9e8ee",
+      "verification": "SHA-256 captured from the official SourceForge HTTPS release asset; MSI is not Authenticode-signed; corresponding source revision and notices must accompany redistribution"
+    },
+    {
       "id": "cygwin-bootstrap",
       "sha512": "6acea47c59781c9e7f544a18d53935d59df6e44d5d52ac95ee165671b8e388820455eebf30ccc7d254b00c3d0eb694269a0f8dc84b17944c1f355dac9c5aafcc",
       "version": "current bootstrap; payload provenance is recorded at install time",
