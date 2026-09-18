@@ -79,4 +79,23 @@ Fill slugs and thematic ADRs as waves are chartered (`whw wave new <slug>
 - libwdi certificate model: https://github.com/pbatard/libwdi/wiki/Certification-Practice-Statement
 - Microsoft WIA: https://learn.microsoft.com/en-us/previous-versions/windows/desktop/wia/-wia-startpage
 
+## Addendum Wave 001 — API-feasibility decision
+
+The baseline is feasible for the local SANE transport and for a future TWAIN integration, but it is not yet a release-ready dual-API installer.
+
+Evidence captured in Wave 001-B/C:
+
+- Commit `a0f18d5` builds SANE 1.4.0/XSane 0.999 with the Plustek backend, installs the HR7-only `device auto` configuration, and registers `GeniusColorPage-HR7-SANE` as an automatic Windows service.
+- The service is running with exactly `127.0.0.1:6566`; `Windows/tests/Test-SanedLoopback.ps1 -Port 16566` accepted an IPv4 loopback connection, rejected wildcard exposure, and cleaned up its temporary listener.
+- `scanimage -L` enumerated `plustek:libusb:002:006` as a KYE/Genius ColorPage-HR7 and `scanimage -A` opened the device and returned its scan options without acquiring a page. This is a SANE/backend proof, not a WIA/TWAIN proof.
+- SANEWinDS 1.6.9221 x64 and x86 installed from the pinned official SourceForge assets; the expected `SANEWinCDS64.ds` and `SANEWinCDS32.ds` files are present. The MSIs are not Authenticode-signed, so this is a local evaluation only until redistribution, source-notice, and signing review are complete.
+- Commit `13a1629` records `whw doctor`, synchronization, and all PR gates as GO.
+
+Decision and gates:
+
+1. Keep the loopback service and SANE configuration as the implementation baseline. Do not expose saned on the LAN or add a firewall exception.
+2. Continue with Wave 002 API work only as an evaluation branch. It must prove TWAIN enumeration/acquisition and WIA enumeration/acquisition with actual client calls before either API can be advertised.
+3. WIA remains blocked: the evaluated WiaSane alpha is old and its official installer could not be retrieved with a valid TLS certificate on this host. Do not weaken TLS or execute an unverifiable binary.
+4. A public end-user GUI package remains blocked until a tested WIA provider, an Authenticode certificate supplied by the owner, and a clean Windows 11 x64 install are available. The current host is Windows 10 22H2, which is best-effort only.
+
 <!-- Addenda: append `## Addendum Wave NNN — <topic>` per wave D, newest last. -->
