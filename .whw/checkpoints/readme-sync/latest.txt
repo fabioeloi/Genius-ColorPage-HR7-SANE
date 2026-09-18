@@ -1,4 +1,4 @@
-# whw gate readme-sync — 2026-09-18T234935Z (20260918T234935Z)
-[234935Z] PASS README makes no wave-done claims
-[234935Z] PASS README local .md links resolve
+# whw gate readme-sync — 2026-09-18T235115Z (20260918T235115Z)
+[235115Z] PASS README makes no wave-done claims
+[235115Z] PASS README local .md links resolve
 status=GO failures=0
