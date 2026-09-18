@@ -1,0 +1,21 @@
+name: whw
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+jobs:
+  whw:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Sync planning
+        run: npx -y @fabioeloi/whw@latest sync --all
+      - name: Doctor
+        run: npx -y @fabioeloi/whw@latest doctor
+      - name: PR gates
+        run: npx -y @fabioeloi/whw@latest gate run --tier pr

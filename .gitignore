@@ -1,0 +1,27 @@
+# Local diagnostic output and run transcripts can contain machine/device details.
+Windows/build-local.log
+Windows/local-*-result.txt
+Windows/local-*-transcript.log
+Windows/scan-debug-*.log
+Windows/usb-workaround-*.log
+Windows/DIAGNOSTIC-STATUS-*.md
+
+# Generated build, package, and development-tool data.
+Windows/build/
+Windows/dist/
+Windows/stage/
+Windows/Artifacts/
+Windows/.cache/
+.tools/
+node_modules/
+.whw/.npm-cache/
+
+# WHW derived state (rebuild with `whw sync --all`; seeds in planning/ are canonical)
+.whw/state.db
+.whw/state.db-journal
+.whw/state.db-wal
+.whw/state.db-shm
+.whw/*.log
+.whw/checkpoints/**/*.txt
+!.whw/checkpoints/**/latest.txt
+.whw/runs/

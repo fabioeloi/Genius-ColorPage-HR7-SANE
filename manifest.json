@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "package": "Genius ColorPage-HR7 SANE",
+  "supported_usb_id": {
+    "vendor_id": "0x0458",
+    "product_id": "0x2013",
+    "windows_hardware_id": "USB\\VID_0458&PID_2013"
+  },
+  "artifacts": [
+    {
+      "id": "sane-backends",
+      "version": "1.4.0",
+      "url": "https://gitlab.com/sane-project/backends/-/archive/1.4.0/backends-1.4.0.tar.gz",
+      "sha256": "9c50ee76e35d98d7ae0cbb97d4c2a3c15663a78fdd74b0ed2bf2fe8e1a73f63a",
+      "license": "GPL-2.0-or-later",
+      "verification": "SHA-256 in Install-Windows.ps1"
+    },
+    {
+      "id": "xsane",
+      "version": "0.999",
+      "url": "https://anduin.linuxfromscratch.org/BLFS/xsane/xsane-0.999.tar.gz",
+      "sha256": "5782d23e67dc961c81eef13a87b17eb0144cae3d1ffc5cf7e0322da751482b4b",
+      "license": "GPL-2.0-or-later",
+      "verification": "SHA-256 in Install-Windows.ps1; upstream XSane download is temporarily offline, so this is the BLFS source mirror"
+    },
+    {
+      "id": "zadig",
+      "version": "2.9 (libwdi 1.5.1)",
+      "url": "https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe",
+      "sha256": "4ecaa95df3da3621486a043aef8b3050b8bafe7c901402871e816229ef82039b",
+      "authenticode_subject": "CN=Akeo Consulting",
+      "authenticode_thumbprint": "3DBC3A2A0E9CE8803B422CFDBC60ACD33164965D",
+      "license": "GPL-3.0-or-later",
+      "verification": "SHA-256 and Valid Authenticode signature in Configure-HR7-Driver.ps1"
+    },
+    {
+      "id": "cygwin-bootstrap",
+      "sha512": "6acea47c59781c9e7f544a18d53935d59df6e44d5d52ac95ee165671b8e388820455eebf30ccc7d254b00c3d0eb694269a0f8dc84b17944c1f355dac9c5aafcc",
+      "version": "current bootstrap; payload provenance is recorded at install time",
+      "url": "https://cygwin.com/setup-x86_64.exe",
+      "architecture": "x86_64",
+      "verification": "Pinned SHA-512 from https://cygwin.com/sha512.sum and Valid Authenticode signature by Jon Turney; Cygwin validates the signed package catalog and package checksums"
+    },
+    {
+      "id": "homebrew-sane-backends",
+      "version": "1.4.0",
+      "url": "https://formulae.brew.sh/formula/sane-backends",
+      "license": "GPL-2.0-or-later",
+      "verification": "Homebrew bottle SHA-256; exact installed version asserted by Install-macOS.command"
+    },
+    {
+      "id": "homebrew-simple-scan",
+      "version": "50.0",
+      "url": "https://formulae.brew.sh/formula/simple-scan",
+      "license": "GPL-3.0-or-later",
+      "verification": "Homebrew bottle SHA-256; exact installed version asserted by Install-macOS.command"
+    }
+  ],
+  "sources_and_licenses": "SOURCES-AND-LICENSES.md"
+}
