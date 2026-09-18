@@ -1,3 +1,3 @@
-# whw gate agents-parity — 2026-09-18T222254Z (20260918T222254Z)
-[222254Z] PASS AGENTS.md present (canonical)
+# whw gate agents-parity — 2026-09-18T222906Z (20260918T222906Z)
+[222906Z] PASS AGENTS.md present (canonical)
 status=GO failures=0
