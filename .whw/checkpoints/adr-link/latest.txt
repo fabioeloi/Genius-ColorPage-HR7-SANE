@@ -1,6 +1,6 @@
-# whw gate adr-link — 2026-09-18T235115Z (20260918T235115Z)
-[235115Z] PASS wave-001-api-feasibility → ADR 0001
-[235115Z] PASS wave-002-windows-scan-apis → ADR 0001
-[235115Z] PASS wave-003-gui-installer → ADR 0001
-[235115Z] PASS wave-004-clean-pc-release → ADR 0001
+# whw gate adr-link — 2026-09-18T235147Z (20260918T235147Z)
+[235147Z] PASS wave-001-api-feasibility → ADR 0001
+[235147Z] PASS wave-002-windows-scan-apis → ADR 0001
+[235147Z] PASS wave-003-gui-installer → ADR 0001
+[235147Z] PASS wave-004-clean-pc-release → ADR 0001
 status=GO failures=0
