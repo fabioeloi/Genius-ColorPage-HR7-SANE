@@ -55,3 +55,9 @@ The checked-in `Test-SaneProtocol.ps1` uses the SANEWinDS assembly itself to
 run `Net_Init` and `Net_Get_Devices` against the loopback service. It is a
 transport/provider preflight; it does not substitute for a TWAIN DSM client
 or a WIA COM acquisition test.
+
+`Test-TwainEnumeration.ps1` calls the installed x64 or x86 TWAIN DSM and
+enumerates `SANEWinDS`; both bitnesses returned the data source identity. An
+attempt to send `DAT_IDENTITY/MSG_OPENDS` in this host did not return promptly,
+so source opening, capability exchange, acquisition, and cancellation remain
+explicitly unverified rather than being reported as passing.
