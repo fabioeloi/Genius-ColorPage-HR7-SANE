@@ -61,3 +61,11 @@ enumerates `SANEWinDS`; both bitnesses returned the data source identity. An
 attempt to send `DAT_IDENTITY/MSG_OPENDS` in this host did not return promptly,
 so source opening, capability exchange, acquisition, and cancellation remain
 explicitly unverified rather than being reported as passing.
+
+The bounded `Test-SaneOpen.ps1` probe reproduces the lower-level failure
+without touching the scanner surface: x64 and x86 SANEWinDS both failed to
+return from `Net_Open` within five seconds. The loopback saned log records
+`process_request: bad status 113` immediately after the authenticated client
+connection. This is stronger than a TWAIN UI timeout but still does not identify
+whether the defect is in the SANEWinDS protocol client or this Windows saned
+build; do not promote either API until a compatible `Net_Open` path is proven.
