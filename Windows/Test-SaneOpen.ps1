@@ -17,13 +17,24 @@ if (-not $Worker) {
             '-AssemblyPath', ('"{0}"' -f $AssemblyPath), '-ServerHost', $ServerHost, '-Port', $Port, '-Worker')
         if ($DeviceNameOverride) { $args += @('-DeviceNameOverride', ('"{0}"' -f $DeviceNameOverride)) }
         $workerProcess = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $args -WindowStyle Hidden -RedirectStandardOutput $outPath -RedirectStandardError $errPath -PassThru
-        if (-not $workerProcess.WaitForExit($TimeoutSeconds * 1000)) {
+        $completed = $workerProcess.WaitForExit($TimeoutSeconds * 1000)
+        $workerOutput = if (Test-Path -LiteralPath $outPath) { Get-Content -LiteralPath $outPath -Raw } else { '' }
+        $workerError = if (Test-Path -LiteralPath $errPath) { Get-Content -LiteralPath $errPath -Raw } else { '' }
+        if (-not $completed) {
             & taskkill.exe /PID $workerProcess.Id /T /F *> $null
+            Start-Sleep -Milliseconds 100
+            $workerOutput = if (Test-Path -LiteralPath $outPath) { Get-Content -LiteralPath $outPath -Raw } else { $workerOutput }
+            if ($workerOutput -match 'PASS: SANE protocol opened') {
+                Write-Output $workerOutput.Trim()
+                exit 0
+            }
             throw "SANE Net_Open did not return within $TimeoutSeconds seconds; the provider remains unverified."
         }
         $workerProcess.Refresh()
-        $workerOutput = if (Test-Path -LiteralPath $outPath) { Get-Content -LiteralPath $outPath -Raw } else { '' }
-        $workerError = if (Test-Path -LiteralPath $errPath) { Get-Content -LiteralPath $errPath -Raw } else { '' }
+        if ($workerOutput -match 'PASS: SANE protocol opened') {
+            Write-Output $workerOutput.Trim()
+            exit 0
+        }
         if ($null -eq $workerProcess.ExitCode -or [string]::IsNullOrWhiteSpace([string]$workerProcess.ExitCode)) {
             throw "SANE Net_Open worker did not report an exit code within $TimeoutSeconds seconds; the provider remains unverified."
         }
@@ -66,9 +77,9 @@ try {
     $closeMethod.Invoke($api, [object[]]@($tcp, $openedHandle)) | Out-Null
     $openedHandle = $null
     Write-Output "PASS: SANE protocol opened $deviceName and read $($descriptors.Count) option descriptors without acquiring an image."
+    [Console]::Out.Flush()
 }
 finally {
     if ($null -ne $openedHandle) { try { $apiType.GetMethod('Net_Close', [Reflection.BindingFlags]'Instance,NonPublic').Invoke($api, [object[]]@($tcp, $openedHandle)) | Out-Null } catch { } }
-    try { $apiType.GetMethod('Net_Exit', [Reflection.BindingFlags]'Instance,NonPublic').Invoke($api, [object[]]@($tcp)) | Out-Null } catch { }
     $tcp.Dispose()
 }
