@@ -86,4 +86,14 @@ image evidence. This is recorded as an acquisition failure, not a pass; the
 scanner should be power-cycled before another physical attempt. The client now
 also supports a bounded native-transfer diagnostic (`-TransferMode Native
 -SkipCapabilitySetup`) so the provider's default TWAIN transfer path can be
-tested separately from the memory-transfer path. WIA remains unverified.
+tested separately from the memory-transfer path. After the requested scanner
+power cycle, PnP still reports the HR7 present with WinUSB, and
+`sane-find-scanner -q` sees `0458:2013` at `libusb:002:006`. However,
+`scanimage -L` does not list it: Plustek recognizes the supported device but
+fails opening it with `sanei_access_lock failed: 11`. The command exits zero
+despite listing no devices, so the listing/debug output, not exit code alone,
+is the criterion. A stale SYSTEM-owned `saned` connection child from the prior
+probe remains alive; this non-elevated session cannot stop it, and the attempted
+service restart did not complete. No new acquisition was attempted. Restart
+the local SANE service with administrator approval, then repeat enumeration
+before any TWAIN scan. WIA remains unverified.
