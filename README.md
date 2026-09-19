@@ -4,7 +4,7 @@ An open SANE-based scanning path for the Genius ColorPage-HR7 (`0458:2013`). The
 
 ## Windows deployment status
 
-The current Windows package is a developer-oriented SANE/XSane setup and still requires manual driver binding. It does not yet provide WIA or TWAIN sources, so it does not meet the end-user deployment goal. The WHW program charter in `docs/adr/` tracks the work to add those interfaces and replace the script/Zadig end-user flow with one signed GUI installer.
+The current Windows package is still an evaluation/developer setup and requires manual driver binding. `Windows/Configure-WindowsProviders.ps1` can configure the installed SANEWinDS x86/x64 TWAIN sources behind the loopback service, but client-level image acquisition is not yet green and no verified WIA provider is included. It therefore does not meet the end-user deployment goal. The WHW program charter in `docs/adr/` tracks the remaining API evidence and the replacement of the script/Zadig flow with one signed GUI installer.
 
 The target is Windows 11 x64, with Windows 10 22H2 x64 as best-effort legacy coverage. The eventual package will support applications that use WIA and/or TWAIN; it cannot promise compatibility with software that supports neither API.
 

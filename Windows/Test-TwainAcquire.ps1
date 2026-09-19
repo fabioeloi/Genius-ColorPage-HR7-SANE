@@ -4,6 +4,8 @@ param(
     [ValidateRange(1, 180)] [int] $TimeoutSeconds = 60,
     [ValidateRange(1, 600)] [int] $ResolutionDpi = 75,
     [ValidateSet('Gray', 'Color')] [string] $PixelMode = 'Gray',
+    [ValidateSet('Memory', 'Native')] [string] $TransferMode = 'Memory',
+    [switch] $SkipCapabilitySetup,
     [switch] $Worker
 )
 
@@ -15,7 +17,9 @@ if (-not $Worker) {
     try {
         $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
             '-DataSourceName', ('"{0}"' -f $DataSourceName), '-ResolutionDpi', $ResolutionDpi,
-            '-PixelMode', $PixelMode, '-Worker')
+            '-PixelMode', $PixelMode, '-TransferMode', $TransferMode)
+        if ($SkipCapabilitySetup) { $args += '-SkipCapabilitySetup' }
+        $args += '-Worker'
         $workerProcess = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $args -WindowStyle Hidden -RedirectStandardOutput $outPath -RedirectStandardError $errPath -PassThru
         $completed = $workerProcess.WaitForExit($TimeoutSeconds * 1000)
         $workerOutput = if (Test-Path -LiteralPath $outPath) { Get-Content -LiteralPath $outPath -Raw } else { '' }
@@ -171,6 +175,10 @@ namespace Hr7Twain {
         [DllImport("TWAINDSM.dll", CallingConvention = CallingConvention.StdCall)]
         public static extern ushort DSM_Entry(ref TW_IDENTITY origin, IntPtr destination, uint dg, ushort dat, ushort msg, IntPtr data);
 
+        [DllImport("gdi32.dll", CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool DeleteObject(IntPtr handle);
+
         public sealed class OpenResult {
             public ushort Code;
             public TW_IDENTITY Source;
@@ -270,6 +278,7 @@ function Invoke-Source {
                 'Hr7Twain.TW_SETUPMEMXFER' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_SETUPMEMXFER') }
                 'Hr7Twain.TW_IMAGEMEMXFER' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_IMAGEMEMXFER') }
                 'Hr7Twain.TW_PENDINGXFERS' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_PENDINGXFERS') }
+                'System.IntPtr' { $updated = [Runtime.InteropServices.Marshal]::ReadIntPtr($valuePointer) }
                 default { throw "Unsupported TWAIN readback structure: $ValueTypeName" }
             }
         }
@@ -366,30 +375,36 @@ try {
     $source = $openResult.Source
     $sourceOpen = $true
 
-    $gray = if ($PixelMode -eq 'Gray') { 1 } else { 2 }
-    $settings = @(
-        @{ Capability = 1; ItemType = 1; Item = 1 },
-        @{ Capability = 257; ItemType = 4; Item = $gray },
-        @{ Capability = 4376; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
-        @{ Capability = 4377; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
-        @{ Capability = 259; ItemType = 4; Item = 2 }
-    )
-    foreach ($setting in $settings) {
-        $setCode = Set-TwainOneValue -Origin $origin -Source $source -Capability $setting.Capability -ItemType $setting.ItemType -Item $setting.Item
-        if ($setCode -ne 0) { Write-Verbose "TWAIN capability $($setting.Capability) returned $setCode; continuing with provider defaults." }
-    }
+    if (-not $SkipCapabilitySetup) {
+        $gray = if ($PixelMode -eq 'Gray') { 1 } else { 2 }
+        $transferItem = if ($TransferMode -eq 'Native') { 0 } else { 2 }
+        $settings = @(
+            @{ Capability = 1; ItemType = 1; Item = 1 },
+            @{ Capability = 257; ItemType = 4; Item = $gray },
+            @{ Capability = 4376; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
+            @{ Capability = 4377; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
+            @{ Capability = 259; ItemType = 4; Item = $transferItem }
+        )
+        foreach ($setting in $settings) {
+            $setCode = Set-TwainOneValue -Origin $origin -Source $source -Capability $setting.Capability -ItemType $setting.ItemType -Item $setting.Item
+            if ($setCode -ne 0) { Write-Verbose "TWAIN capability $($setting.Capability) returned $setCode; continuing with provider defaults." }
+        }
 
-    $layout = New-Object Hr7Twain.TW_IMAGELAYOUT
-    $layout.Frame = New-Object Hr7Twain.TW_FRAME
-    $layout.Frame.Left = [Hr7Twain.TW_FIX32]::FromDouble(0)
-    $layout.Frame.Top = [Hr7Twain.TW_FIX32]::FromDouble(0)
-    $layout.Frame.Right = [Hr7Twain.TW_FIX32]::FromDouble(2)
-    $layout.Frame.Bottom = [Hr7Twain.TW_FIX32]::FromDouble(2)
-    $layout.DocumentNumber = [uint32]::MaxValue
-    $layout.PageNumber = [uint32]::MaxValue
-    $layout.FrameNumber = [uint32]::MaxValue
-    $layoutCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 258 -Message 6 -Value $layout -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGELAYOUT')) -ValueTypeName 'Hr7Twain.TW_IMAGELAYOUT'
-    if ($layoutCall.Code -ne 0) { Write-Verbose "TWAIN frame setup returned $($layoutCall.Code); continuing with provider defaults." }
+        $layout = New-Object Hr7Twain.TW_IMAGELAYOUT
+        $layout.Frame = New-Object Hr7Twain.TW_FRAME
+        $layout.Frame.Left = [Hr7Twain.TW_FIX32]::FromDouble(0)
+        $layout.Frame.Top = [Hr7Twain.TW_FIX32]::FromDouble(0)
+        $layout.Frame.Right = [Hr7Twain.TW_FIX32]::FromDouble(2)
+        $layout.Frame.Bottom = [Hr7Twain.TW_FIX32]::FromDouble(2)
+        $layout.DocumentNumber = [uint32]::MaxValue
+        $layout.PageNumber = [uint32]::MaxValue
+        $layout.FrameNumber = [uint32]::MaxValue
+        $layoutCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 258 -Message 6 -Value $layout -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGELAYOUT')) -ValueTypeName 'Hr7Twain.TW_IMAGELAYOUT'
+        if ($layoutCall.Code -ne 0) { Write-Verbose "TWAIN frame setup returned $($layoutCall.Code); continuing with provider defaults." }
+    }
+    else {
+        Write-Verbose 'Skipping capability and frame setup; using provider defaults.'
+    }
 
     $uiCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 9 -Message 1282 -Value $ui -Size $uiSize -ValueTypeName 'Hr7Twain.TW_USERINTERFACE'
     if ($uiCall.Code -ne 0) { throw "TWAIN MSG_ENABLEDS returned code $($uiCall.Code)." }
@@ -406,46 +421,73 @@ try {
         Start-Sleep -Milliseconds 50
     }
     if ($null -eq $imageInfo) { throw 'TWAIN source did not report image information before the acquisition deadline.' }
-    $setup = New-Object Hr7Twain.TW_SETUPMEMXFER
-    $setupCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 6 -Message 1 -Value $setup -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_SETUPMEMXFER')) -ValueTypeName 'Hr7Twain.TW_SETUPMEMXFER'
-    if ($setupCall.Code -ne 0) { throw "TWAIN DAT_SETUPMEMXFER returned code $($setupCall.Code)." }
-    $setup = $setupCall.Value
-    $bufferSize = [Math]::Max(65536, [Math]::Min([int]$setup.Preferred, 4 * 1024 * 1024))
-    $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($bufferSize)
     $totalBytes = 0L
     $nonBlankBytes = 0L
     $chunks = 0
-    try {
-        while ($true) {
-            $memory = New-Object Hr7Twain.TW_MEMORY
-            $memory.Flags = 1
-            $memory.Length = [uint32]$bufferSize
-            $memory.TheMem = $buffer
-            $transfer = New-Object Hr7Twain.TW_IMAGEMEMXFER
-            $transfer.Memory = $memory
-            $transferSize = [Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGEMEMXFER')
-            $transferCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 259 -Message 1 -Value $transfer -Size $transferSize -ValueTypeName 'Hr7Twain.TW_IMAGEMEMXFER'
-            if ($transferCall.Code -ne 0 -and $transferCall.Code -ne 6) { throw "TWAIN DAT_IMAGEMEMXFER returned code $($transferCall.Code)." }
-            $transfer = $transferCall.Value
-            $written = [int][Math]::Min([uint32]$bufferSize, $transfer.BytesWritten)
-            if ($written -gt 0) {
-                $chunk = New-Object byte[] $written
-                [Runtime.InteropServices.Marshal]::Copy($buffer, $chunk, 0, $written)
-                $totalBytes += $written
-                $nonBlankBytes += @($chunk | Where-Object { $_ -ne 0 -and $_ -ne 255 }).Count
-                $chunks++
+    if ($TransferMode -eq 'Native') {
+        Add-Type -AssemblyName System.Drawing
+        $nativeCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 4 -Message 1 -Value ([IntPtr]::Zero) -Size ([IntPtr]::Size) -ValueTypeName 'System.IntPtr'
+        if ($nativeCall.Code -ne 0 -and $nativeCall.Code -ne 6) { throw "TWAIN DAT_IMAGENATIVEXFER returned code $($nativeCall.Code)." }
+        $hBitmap = [IntPtr]$nativeCall.Value
+        if ($hBitmap -eq [IntPtr]::Zero) { throw 'TWAIN native transfer returned a null bitmap handle.' }
+        $bitmap = $null
+        try {
+            $bitmap = [System.Drawing.Image]::FromHbitmap($hBitmap)
+            $sampleStepX = [Math]::Max(1, [int]($bitmap.Width / 32))
+            $sampleStepY = [Math]::Max(1, [int]($bitmap.Height / 32))
+            for ($y = 0; $y -lt $bitmap.Height; $y += $sampleStepY) {
+                for ($x = 0; $x -lt $bitmap.Width; $x += $sampleStepX) {
+                    $pixel = $bitmap.GetPixel($x, $y)
+                    if ($pixel.R -ne 0 -and $pixel.R -ne 255 -or $pixel.G -ne 0 -and $pixel.G -ne 255 -or $pixel.B -ne 0 -and $pixel.B -ne 255) { $nonBlankBytes++ }
+                }
             }
-            if ($transferCall.Code -eq 6) { break }
-            if ($chunks -gt 10000) { throw 'TWAIN transfer exceeded the safety chunk limit.' }
-            [System.Windows.Forms.Application]::DoEvents()
+            $totalBytes = [int64]$bitmap.Width * [int64]$bitmap.Height * [Math]::Max(1, [int]$imageInfo.SamplesPerPixel)
+            $chunks = 1
+        }
+        finally {
+            if ($bitmap) { $bitmap.Dispose() }
+            [void][Hr7Twain.AcquireNative]::DeleteObject($hBitmap)
         }
     }
-    finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer) }
+    else {
+        $setup = New-Object Hr7Twain.TW_SETUPMEMXFER
+        $setupCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 6 -Message 1 -Value $setup -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_SETUPMEMXFER')) -ValueTypeName 'Hr7Twain.TW_SETUPMEMXFER'
+        if ($setupCall.Code -ne 0) { throw "TWAIN DAT_SETUPMEMXFER returned code $($setupCall.Code)." }
+        $setup = $setupCall.Value
+        $bufferSize = [Math]::Max(65536, [Math]::Min([int]$setup.Preferred, 4 * 1024 * 1024))
+        $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($bufferSize)
+        try {
+            while ($true) {
+                $memory = New-Object Hr7Twain.TW_MEMORY
+                $memory.Flags = 1
+                $memory.Length = [uint32]$bufferSize
+                $memory.TheMem = $buffer
+                $transfer = New-Object Hr7Twain.TW_IMAGEMEMXFER
+                $transfer.Memory = $memory
+                $transferSize = [Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGEMEMXFER')
+                $transferCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 259 -Message 1 -Value $transfer -Size $transferSize -ValueTypeName 'Hr7Twain.TW_IMAGEMEMXFER'
+                if ($transferCall.Code -ne 0 -and $transferCall.Code -ne 6) { throw "TWAIN DAT_IMAGEMEMXFER returned code $($transferCall.Code)." }
+                $transfer = $transferCall.Value
+                $written = [int][Math]::Min([uint32]$bufferSize, $transfer.BytesWritten)
+                if ($written -gt 0) {
+                    $chunk = New-Object byte[] $written
+                    [Runtime.InteropServices.Marshal]::Copy($buffer, $chunk, 0, $written)
+                    $totalBytes += $written
+                    $nonBlankBytes += @($chunk | Where-Object { $_ -ne 0 -and $_ -ne 255 }).Count
+                    $chunks++
+                }
+                if ($transferCall.Code -eq 6) { break }
+                if ($chunks -gt 10000) { throw 'TWAIN transfer exceeded the safety chunk limit.' }
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+        }
+        finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer) }
+    }
     $pending = New-Object Hr7Twain.TW_PENDINGXFERS
     $endCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 5 -Message 1793 -Value $pending -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_PENDINGXFERS')) -ValueTypeName 'Hr7Twain.TW_PENDINGXFERS'
     if ($endCall.Code -ne 0) { throw "TWAIN MSG_ENDXFER returned code $($endCall.Code)." }
     if ($nonBlankBytes -le 0) { throw 'TWAIN transfer returned only blank pixels.' }
-    Write-Output "PASS: TWAIN acquired $totalBytes bytes in $chunks memory chunks ($($imageInfo.ImageWidth)x$($imageInfo.ImageLength), $PixelMode, ${ResolutionDpi}dpi); nonblank=$nonBlankBytes."
+    Write-Output "PASS: TWAIN acquired $totalBytes bytes in $chunks $($TransferMode.ToLowerInvariant()) chunks ($($imageInfo.ImageWidth)x$($imageInfo.ImageLength), $PixelMode, ${ResolutionDpi}dpi); nonblank=$nonBlankBytes."
     [Console]::Out.Flush()
 }
 finally {

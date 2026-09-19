@@ -72,9 +72,18 @@ image. A temporary loopback trace also confirmed the expected
 This proves the SANE transport/provider preflight; it does not substitute for
 acquiring an image through a TWAIN or WIA client.
 
+`Configure-WindowsProviders.ps1` is the shared elevated provider-configuration
+action for the eventual GUI package. It verifies the HR7 WinUSB association,
+the running loopback service, and the single `127.0.0.1:6566` listener before
+configuring both SANEWinDS TWAIN data sources and recording provider state.
+`-InstallTwainPackages` is intentionally explicit; the evaluated SANEWinDS
+MSIs are unsigned and must not be silently promoted to release artifacts.
+
 `Test-TwainAcquire.ps1` reached `MSG_ENABLEDS` and the SANEWinDS image worker,
 but the provider reported `SANE_STATUS_INVAL` while acquiring frames and then
 returned no bitmap. The bounded wrapper terminated after 60 seconds without
 image evidence. This is recorded as an acquisition failure, not a pass; the
-scanner should be power-cycled before another physical attempt. WIA remains
-unverified.
+scanner should be power-cycled before another physical attempt. The client now
+also supports a bounded native-transfer diagnostic (`-TransferMode Native
+-SkipCapabilitySetup`) so the provider's default TWAIN transfer path can be
+tested separately from the memory-transfer path. WIA remains unverified.

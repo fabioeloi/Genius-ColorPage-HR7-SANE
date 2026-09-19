@@ -83,7 +83,7 @@ Por padrão, isso remove somente configurações, lançador e logs locais. Use -
 
 ## Limitações conhecidas
 
-- Isto não fornece TWAIN, WIA ou suporte ao software antigo da Genius.
+- O pacote atual ainda não é instalador para usuário final: o configurador experimental pode preparar TWAIN x86/x64 via SANEWinDS, mas a aquisição por aplicativo ainda não foi aprovada e não há provedor WIA verificado.
 - A associação WinUSB é experimental e reversível, porém depende do estado do Driver Store do computador.
 - XSane 0.999 é uma interface gráfica legada; ela é usada aqui porque funciona com SANE no Cygwin/X. O backend e o ID USB continuam fixados no runtime privado.
 - Em 17/09/2026, testes físicos no Windows capturaram uma página de teste HP em 75 dpi e uma página inteira em 150 dpi pela instalação padrão SANE 1.4.0 com pthread. As imagens contêm texto e ilustrações reconhecíveis; o usuário confirmou deslocamento completo e retorno suave do carro. XSane e o macOS não foram testados fisicamente aqui. O diagnóstico e os logs estão registrados em Windows/DIAGNOSTIC-STATUS-20260916.md.
