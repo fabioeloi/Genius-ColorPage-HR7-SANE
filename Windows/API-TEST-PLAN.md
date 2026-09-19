@@ -57,10 +57,12 @@ transport/provider preflight; it does not substitute for a TWAIN DSM client
 or a WIA COM acquisition test.
 
 `Test-TwainEnumeration.ps1` calls the installed x64 or x86 TWAIN DSM and
-enumerates `SANEWinDS`; both bitnesses returned the data source identity. An
-attempt to send `DAT_IDENTITY/MSG_OPENDS` in this host did not return promptly,
-so source opening, capability exchange, acquisition, and cancellation remain
-explicitly unverified rather than being reported as passing.
+enumerates `SANEWinDS`; both bitnesses returned the data source identity.
+`Test-TwainOpen.ps1` then opened that source through `DAT_IDENTITY/MSG_OPENDS`
+on both bitnesses; its bounded client passes after marshalling the source
+identity through an allocated TWAIN data block. Source opening is therefore
+verified, but capability exchange, acquisition, cancellation, and reconnect
+are still separate gates.
 
 The bounded `Test-SaneOpen.ps1` probe now completes the SANE protocol open path
 for both x64 and x86 SANEWinDS: `Net_Open` returned `SANE_STATUS_GOOD`, 45
@@ -68,4 +70,11 @@ option descriptors were read, and the handle was closed without acquiring an
 image. A temporary loopback trace also confirmed the expected
 `INIT → GET_DEVICES → OPEN → GET_OPTION_DESCRIPTORS → CLOSE → EXIT` exchange.
 This proves the SANE transport/provider preflight; it does not substitute for
-opening the TWAIN data source or acquiring an image through a client.
+acquiring an image through a TWAIN or WIA client.
+
+`Test-TwainAcquire.ps1` reached `MSG_ENABLEDS` and the SANEWinDS image worker,
+but the provider reported `SANE_STATUS_INVAL` while acquiring frames and then
+returned no bitmap. The bounded wrapper terminated after 60 seconds without
+image evidence. This is recorded as an acquisition failure, not a pass; the
+scanner should be power-cycled before another physical attempt. WIA remains
+unverified.

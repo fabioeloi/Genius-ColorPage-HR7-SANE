@@ -56,6 +56,44 @@ if ((Test-Path -LiteralPath $configPath -PathType Leaf) -and -not (Test-Path -Li
 }
 Copy-Item -LiteralPath $templatePath -Destination $configPath -Force
 
+# SANEWinDS 1.6.9221 reads the host list from the per-user SANEWinDS.ini and
+# does not reliably fall back to the shared ProgramData copy when a user file
+# already exists. Seed existing profiles and the Default profile so a normal
+# TWAIN client can open the source without a command-line first-run step.
+$profileRoots = [System.Collections.Generic.List[string]]::new()
+foreach ($root in @(
+    [Environment]::GetFolderPath('ApplicationData'),
+    [Environment]::GetFolderPath('LocalApplicationData')
+)) {
+    if (-not [string]::IsNullOrWhiteSpace($root)) { $profileRoots.Add($root) }
+}
+$usersRoot = Join-Path $env:SystemDrive 'Users'
+if (Test-Path -LiteralPath $usersRoot -PathType Container) {
+    foreach ($profile in Get-ChildItem -LiteralPath $usersRoot -Directory -ErrorAction SilentlyContinue) {
+        if ($profile.Name -in @('Public', 'All Users')) { continue }
+        foreach ($relative in @('AppData\Roaming', 'AppData\Local')) {
+            $candidate = Join-Path $profile.FullName $relative
+            if (Test-Path -LiteralPath $candidate -PathType Container) { $profileRoots.Add($candidate) }
+        }
+    }
+}
+$userConfigPaths = @($profileRoots | Select-Object -Unique | ForEach-Object { Join-Path $_ 'SANEWinDS\SANEWinDS.ini' })
+$userBackups = @()
+foreach ($userConfigPath in $userConfigPaths) {
+    $userDirectory = Split-Path -Parent $userConfigPath
+    New-Item -ItemType Directory -Force -Path $userDirectory | Out-Null
+    if (Test-Path -LiteralPath $userConfigPath -PathType Leaf) {
+        $safeName = (($userConfigPath -replace '[^A-Za-z0-9._-]', '_').Trim('_'))
+        $userBackup = Join-Path $stateDirectory ("sane-winds\user-configs\$safeName.before-package")
+        if (-not (Test-Path -LiteralPath $userBackup -PathType Leaf)) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $userBackup) | Out-Null
+            Copy-Item -LiteralPath $userConfigPath -Destination $userBackup -Force
+        }
+        $userBackups += $userBackup
+    }
+    Copy-Item -LiteralPath $templatePath -Destination $userConfigPath -Force
+}
+
 $twain32 = Join-Path $env:WINDIR 'twain_32\SANEWinDS\SANEWinCDS32.ds'
 $twain64 = Join-Path $env:WINDIR 'twain_64\SANEWinDS\SANEWinCDS64.ds'
 if (-not (Test-Path -LiteralPath $twain32 -PathType Leaf) -or -not (Test-Path -LiteralPath $twain64 -PathType Leaf)) {
@@ -69,6 +107,8 @@ $metadata = [ordered]@{
     port = 6566
     twain_x86 = $twain32
     twain_x64 = $twain64
+    user_configs = @($userConfigPaths)
+    user_config_backups = @($userBackups)
     artifacts = @($artifacts | ForEach-Object { [ordered]@{ id = $_.id; version = $_.version; sha256 = $_.sha256 } })
 }
 $statePath = Join-Path $stateDirectory 'state.json'
