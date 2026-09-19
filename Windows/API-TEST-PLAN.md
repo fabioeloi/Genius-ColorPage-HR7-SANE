@@ -79,21 +79,50 @@ configuring both SANEWinDS TWAIN data sources and recording provider state.
 `-InstallTwainPackages` is intentionally explicit; the evaluated SANEWinDS
 MSIs are unsigned and must not be silently promoted to release artifacts.
 
-`Test-TwainAcquire.ps1` reached `MSG_ENABLEDS` and the SANEWinDS image worker,
-but the provider reported `SANE_STATUS_INVAL` while acquiring frames and then
-returned no bitmap. The bounded wrapper terminated after 60 seconds without
-image evidence. This is recorded as an acquisition failure, not a pass; the
-scanner should be power-cycled before another physical attempt. The client now
-also supports a bounded native-transfer diagnostic (`-TransferMode Native
--SkipCapabilitySetup`) so the provider's default TWAIN transfer path can be
-tested separately from the memory-transfer path. After the requested scanner
-power cycle, PnP still reports the HR7 present with WinUSB, and
-`sane-find-scanner -q` sees `0458:2013` at `libusb:002:006`. However,
-`scanimage -L` does not list it: Plustek recognizes the supported device but
-fails opening it with `sanei_access_lock failed: 11`. The command exits zero
-despite listing no devices, so the listing/debug output, not exit code alone,
-is the criterion. A stale SYSTEM-owned `saned` connection child from the prior
-probe remains alive; this non-elevated session cannot stop it, and the attempted
-service restart did not complete. No new acquisition was attempted. Restart
-the local SANE service with administrator approval, then repeat enumeration
-before any TWAIN scan. WIA remains unverified.
+`Test-SaneAcquire.ps1` now exercises the installed SANEWinDS protocol assembly
+against the loopback service, including `Net_Start` and frame acquisition. It
+passed with and without a pre-start `Net_Get_Parameters` query: one 202x150 RGB
+frame, 90,900 bytes, with nonblank pixels. A direct local `scanimage` test also
+passed at 75 dpi grayscale, producing a nonblank 295x221 TIFF (65,417 bytes).
+
+After the user restarted the service, `sane-find-scanner -q` saw the HR7 at
+`libusb:002:006`, `scanimage -L` listed it, and `Test-SaneOpen.ps1` opened it
+and read 45 descriptors. `Test-TwainOpen.ps1` opened `SANEWinDS` through both
+the x86 and x64 TWAIN DSMs. The service is currently running with its listener
+bound only to `127.0.0.1:6566`.
+
+`Test-TwainAcquire.ps1` was corrected to use `DAT_IMAGENATIVEXFER` (`0x0104`),
+read native transfers as DIB blocks, marshal integer `TW_FIX32` resolution
+values correctly, and initialize TWAIN memory transfers with the required
+app-owned pointer flags and don't-care fields. It now selects the installed
+provider log by client bitness and enables verbose logging only in the test
+process. The following client-level acquisitions passed and completed
+`MSG_ENDXFER`:
+
+- x64 native full-page Color: 423x584 pixels at 96 dpi; the DIB contained
+  742,848 pixel bytes and 331 sampled nonblank pixels. The earlier full-bed
+  scan and return were observed to be smooth.
+- x64 and x86 native Gray preview: each returned a 150x150, 8-bpp DIB with
+  1,444 sampled nonblank pixels. The scanner log confirms 75 dpi and a 2-inch
+  frame were applied; SANEWinDS returns `TWRC_CHECKSTATUS` for the frame's
+  inexact dimension match. Its post-transfer `DAT_IMAGEINFO` changes to 96 dpi,
+  so the harness records both pre- and post-transfer values.
+- x64 and x86 memory Gray preview: each returned 22,800 bytes at 150x150 and
+  75 dpi, with 22,796 and 22,797 nonblank bytes respectively.
+
+The user reports the latest short TWAIN carriage movement and return were
+smooth. WIA is not available on this installation: `WIA.DeviceManager` reports
+zero devices, so the HR7 is still not discoverable to WIA-only applications.
+The public [WiaSane source](https://github.com/mback2k/wiasane) was retrieved
+over GitHub TLS at commit `cb38cb469e4dbaed771806d5ca2606baa3086e20`
+(2017-02-19; archive SHA-256
+`900260b6938c24918b80da34116b7683439e0a36b3ae444c593bede75fa927a2`). Its
+README targets Windows 7, WDK 8.0, and Visual Studio 2012. This host has no
+Visual Studio, MSBuild, or WDK toolchain, and no validated WIA binary is
+installed; the author's linked 2016 alpha installer also fails TLS validation
+here with Schannel `SEC_E_WRONG_PRINCIPAL`. No TLS bypass was used and the
+installer was not downloaded or run, so the candidate remains unbuilt and
+unverified here.
+Remaining release coverage includes x86 full-page and Color cases,
+cancellation/reconnect cases for both TWAIN bitnesses, a supported WIA
+implementation/acquisition, and the signed end-user installer.

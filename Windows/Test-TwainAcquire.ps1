@@ -6,6 +6,8 @@ param(
     [ValidateSet('Gray', 'Color')] [string] $PixelMode = 'Gray',
     [ValidateSet('Memory', 'Native')] [string] $TransferMode = 'Memory',
     [switch] $SkipCapabilitySetup,
+    [switch] $SkipFrameSetup,
+    [switch] $EnableProviderDebugLog,
     [switch] $Worker
 )
 
@@ -16,9 +18,12 @@ if (-not $Worker) {
     $errPath = "$outPath.err"
     try {
         $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
-            '-DataSourceName', ('"{0}"' -f $DataSourceName), '-ResolutionDpi', $ResolutionDpi,
+            '-DataSourceName', ('"{0}"' -f $DataSourceName), '-TimeoutSeconds', $TimeoutSeconds, '-ResolutionDpi', $ResolutionDpi,
             '-PixelMode', $PixelMode, '-TransferMode', $TransferMode)
         if ($SkipCapabilitySetup) { $args += '-SkipCapabilitySetup' }
+        if ($SkipFrameSetup) { $args += '-SkipFrameSetup' }
+        if ($EnableProviderDebugLog) { $args += '-EnableProviderDebugLog' }
+        if ($VerbosePreference -eq 'Continue') { $args += '-Verbose' }
         $args += '-Worker'
         $workerProcess = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList $args -WindowStyle Hidden -RedirectStandardOutput $outPath -RedirectStandardError $errPath -PassThru
         $completed = $workerProcess.WaitForExit($TimeoutSeconds * 1000)
@@ -171,13 +176,41 @@ namespace Hr7Twain {
         public uint EOJ;
     }
 
+    [StructLayout(LayoutKind.Sequential, Pack = 2)]
+    public struct TW_STATUS {
+        public ushort ConditionCode;
+        public ushort Reserved;
+    }
+
     public static class AcquireNative {
         [DllImport("TWAINDSM.dll", CallingConvention = CallingConvention.StdCall)]
         public static extern ushort DSM_Entry(ref TW_IDENTITY origin, IntPtr destination, uint dg, ushort dat, ushort msg, IntPtr data);
 
-        [DllImport("gdi32.dll", CallingConvention = CallingConvention.StdCall)]
+        [DllImport("kernel32.dll", EntryPoint = "GlobalSize", SetLastError = true)]
+        public static extern UIntPtr GlobalSize(IntPtr handle);
+
+        [DllImport("kernel32.dll", EntryPoint = "GlobalLock", SetLastError = true)]
+        private static extern IntPtr GlobalLockHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", EntryPoint = "GlobalUnlock", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool DeleteObject(IntPtr handle);
+        private static extern bool GlobalUnlockHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", EntryPoint = "GlobalFree", SetLastError = true)]
+        private static extern IntPtr GlobalFreeHandle(IntPtr handle);
+
+        public static IntPtr LockDib(IntPtr handle) {
+            return IntPtr.Size == 8 ? handle : GlobalLockHandle(handle);
+        }
+
+        public static bool UnlockDib(IntPtr handle) {
+            return IntPtr.Size == 8 || GlobalUnlockHandle(handle);
+        }
+
+        public static void FreeDib(IntPtr handle) {
+            if (IntPtr.Size == 8) Marshal.FreeHGlobal(handle);
+            else GlobalFreeHandle(handle);
+        }
 
         public sealed class OpenResult {
             public ushort Code;
@@ -278,6 +311,7 @@ function Invoke-Source {
                 'Hr7Twain.TW_SETUPMEMXFER' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_SETUPMEMXFER') }
                 'Hr7Twain.TW_IMAGEMEMXFER' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_IMAGEMEMXFER') }
                 'Hr7Twain.TW_PENDINGXFERS' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_PENDINGXFERS') }
+                'Hr7Twain.TW_STATUS' { $updated = [Runtime.InteropServices.Marshal]::PtrToStructure($valuePointer, [type]'Hr7Twain.TW_STATUS') }
                 'System.IntPtr' { $updated = [Runtime.InteropServices.Marshal]::ReadIntPtr($valuePointer) }
                 default { throw "Unsupported TWAIN readback structure: $ValueTypeName" }
             }
@@ -323,6 +357,110 @@ function Set-TwainOneValue {
     finally {
         [Runtime.InteropServices.Marshal]::FreeHGlobal($capPointer)
         [Runtime.InteropServices.Marshal]::FreeHGlobal($onePointer)
+    }
+}
+
+function Get-Hr7DibSampleStats {
+    param([Parameter(Mandatory)] [IntPtr] $Handle)
+
+    $dibPointer = [Hr7Twain.AcquireNative]::LockDib($Handle)
+    if ($dibPointer -eq [IntPtr]::Zero) { throw 'TWAIN DIB GlobalLock returned a null pointer.' }
+    try {
+        $dibSize = [Hr7Twain.AcquireNative]::GlobalSize($Handle).ToUInt64()
+        if ($dibSize -lt 40) { throw "TWAIN DIB is too small ($dibSize bytes)." }
+
+        $headerSize = [Runtime.InteropServices.Marshal]::ReadInt32($dibPointer, 0)
+        $width = [Runtime.InteropServices.Marshal]::ReadInt32($dibPointer, 4)
+        $signedHeight = [Runtime.InteropServices.Marshal]::ReadInt32($dibPointer, 8)
+        $planes = [uint16]([Runtime.InteropServices.Marshal]::ReadInt16($dibPointer, 12))
+        $bitsPerPixel = [uint16]([Runtime.InteropServices.Marshal]::ReadInt16($dibPointer, 14))
+        $compression = [Runtime.InteropServices.Marshal]::ReadInt32($dibPointer, 16)
+        $colorsUsed = [Runtime.InteropServices.Marshal]::ReadInt32($dibPointer, 32)
+        $height = [Math]::Abs([long]$signedHeight)
+        if ($headerSize -lt 40 -or $width -le 0 -or $height -le 0 -or $planes -ne 1) {
+            throw "TWAIN returned an invalid DIB header (size=$headerSize, width=$width, height=$signedHeight, planes=$planes)."
+        }
+        if ($compression -ne 0) { throw "TWAIN returned unsupported DIB compression $compression." }
+        if ($bitsPerPixel -notin @(1, 4, 8, 24, 32)) { throw "TWAIN returned unsupported DIB bit depth $bitsPerPixel." }
+
+        $paletteCount = [long]$colorsUsed
+        if ($bitsPerPixel -le 8 -and $paletteCount -eq 0) { $paletteCount = [long](1 -shl $bitsPerPixel) }
+        if ($paletteCount -lt 0 -or $paletteCount -gt 256) { throw "TWAIN returned invalid DIB palette size $paletteCount." }
+        $pixelOffset = [long]$headerSize + ($paletteCount * 4)
+        $stride = [long]([Math]::Floor((([long]$width * $bitsPerPixel + 31) / 32))) * 4
+        $pixelBytes = $stride * $height
+        if ($pixelBytes -le 0 -or $pixelBytes -gt [int]::MaxValue -or ($pixelOffset + $pixelBytes) -gt $dibSize) {
+            throw "TWAIN DIB pixel data exceeds its allocation (offset=$pixelOffset, bytes=$pixelBytes, size=$dibSize)."
+        }
+
+        $stepX = [Math]::Max(1, [int][Math]::Floor($width / 32))
+        $stepY = [Math]::Max(1, [int][Math]::Floor($height / 32))
+        $sampleCount = 0L
+        $nonblankSamples = 0L
+        $minimumIntensity = 255
+        $maximumIntensity = 0
+        for ($y = 0; $y -lt $height; $y += $stepY) {
+            $sourceY = if ($signedHeight -gt 0) { $height - 1 - $y } else { $y }
+            $rowOffset = [long]$sourceY * $stride
+            for ($x = 0; $x -lt $width; $x += $stepX) {
+                switch ($bitsPerPixel) {
+                    1 {
+                        $packed = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, [int]($pixelOffset + $rowOffset + [Math]::Floor($x / 8)))
+                        $paletteIndex = ($packed -shr (7 - ($x % 8))) -band 1
+                    }
+                    4 {
+                        $packed = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, [int]($pixelOffset + $rowOffset + [Math]::Floor($x / 2)))
+                        $paletteIndex = if (($x % 2) -eq 0) { ($packed -shr 4) -band 15 } else { $packed -band 15 }
+                    }
+                    8 {
+                        $paletteIndex = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, [int]($pixelOffset + $rowOffset + $x))
+                    }
+                    24 {
+                        $pixelOffsetAt = [int]($pixelOffset + $rowOffset + ($x * 3))
+                        $blue = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt)
+                        $green = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt + 1)
+                        $red = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt + 2)
+                        $intensity = [int](($red + $green + $blue) / 3)
+                    }
+                    32 {
+                        $pixelOffsetAt = [int]($pixelOffset + $rowOffset + ($x * 4))
+                        $blue = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt)
+                        $green = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt + 1)
+                        $red = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $pixelOffsetAt + 2)
+                        $intensity = [int](($red + $green + $blue) / 3)
+                    }
+                }
+
+                if ($bitsPerPixel -le 8) {
+                    if ($paletteIndex -ge $paletteCount) { throw "DIB pixel references missing palette entry $paletteIndex." }
+                    $paletteOffset = [int]($headerSize + ($paletteIndex * 4))
+                    $blue = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $paletteOffset)
+                    $green = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $paletteOffset + 1)
+                    $red = [int][Runtime.InteropServices.Marshal]::ReadByte($dibPointer, $paletteOffset + 2)
+                    $intensity = [int](($red + $green + $blue) / 3)
+                }
+
+                $sampleCount++
+                if ($intensity -lt 250) { $nonblankSamples++ }
+                if ($intensity -lt $minimumIntensity) { $minimumIntensity = $intensity }
+                if ($intensity -gt $maximumIntensity) { $maximumIntensity = $intensity }
+            }
+        }
+
+        return [pscustomobject]@{
+            Width = $width
+            Height = $height
+            BitsPerPixel = $bitsPerPixel
+            DibBytes = $dibSize
+            PixelBytes = $pixelBytes
+            Samples = $sampleCount
+            NonblankSamples = $nonblankSamples
+            MinimumIntensity = $minimumIntensity
+            MaximumIntensity = $maximumIntensity
+        }
+    }
+    finally {
+        [void][Hr7Twain.AcquireNative]::UnlockDib($Handle)
     }
 }
 
@@ -375,35 +513,62 @@ try {
     $source = $openResult.Source
     $sourceOpen = $true
 
+    if ($EnableProviderDebugLog) {
+        $providerArchitecture = if ([IntPtr]::Size -eq 8) { 'twain_64' } else { 'twain_32' }
+        $nlogPath = Join-Path $env:WINDIR "$providerArchitecture\SANEWinDS\NLog.dll"
+        if (-not (Test-Path -LiteralPath $nlogPath -PathType Leaf)) { throw "Provider NLog assembly was not found: $nlogPath" }
+        $nlogAssembly = [Reflection.Assembly]::LoadFrom($nlogPath)
+        $logManagerType = $nlogAssembly.GetType('NLog.LogManager', $true)
+        $loggingConfiguration = $logManagerType.GetProperty('Configuration').GetValue($null, $null)
+        if ($null -eq $loggingConfiguration) { throw 'Provider NLog has no active configuration.' }
+        $levelType = $nlogAssembly.GetType('NLog.LogLevel', $true)
+        $debugLevel = $levelType.GetField('Debug', [Reflection.BindingFlags]'Public,Static').GetValue($null)
+        $fatalLevel = $levelType.GetField('Fatal', [Reflection.BindingFlags]'Public,Static').GetValue($null)
+        foreach ($rule in $loggingConfiguration.LoggingRules) { $rule.SetLoggingLevels($debugLevel, $fatalLevel) }
+        $reconfigure = $logManagerType.GetMethods([Reflection.BindingFlags]'Public,Static') | Where-Object { $_.Name -eq 'ReconfigExistingLoggers' -and $_.GetParameters().Count -eq 0 } | Select-Object -First 1
+        $reconfigure.Invoke($null, @())
+        Write-Verbose 'Enabled provider Debug logging in this client process only.'
+    }
+
     if (-not $SkipCapabilitySetup) {
         $gray = if ($PixelMode -eq 'Gray') { 1 } else { 2 }
         $transferItem = if ($TransferMode -eq 'Native') { 0 } else { 2 }
         $settings = @(
             @{ Capability = 1; ItemType = 1; Item = 1 },
             @{ Capability = 257; ItemType = 4; Item = $gray },
-            @{ Capability = 4376; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
-            @{ Capability = 4377; ItemType = 7; Item = [int]([Math]::Round($ResolutionDpi * 65536.0)) },
+            # TW_ONEVALUE overlays TW_FIX32 as { short Whole; ushort Frac }.
+            # For this integer-DPI test, that is the integer DPI in Item's low word.
+            @{ Capability = 4376; ItemType = 7; Item = $ResolutionDpi },
+            @{ Capability = 4377; ItemType = 7; Item = $ResolutionDpi },
             @{ Capability = 259; ItemType = 4; Item = $transferItem }
         )
         foreach ($setting in $settings) {
             $setCode = Set-TwainOneValue -Origin $origin -Source $source -Capability $setting.Capability -ItemType $setting.ItemType -Item $setting.Item
             if ($setCode -ne 0) { Write-Verbose "TWAIN capability $($setting.Capability) returned $setCode; continuing with provider defaults." }
         }
+    }
+    else {
+        Write-Verbose 'Skipping TWAIN capability setup; using provider defaults.'
+    }
 
+    if (-not $SkipFrameSetup) {
+        $frame = New-Object Hr7Twain.TW_FRAME
+        $frame.Left = [Hr7Twain.TW_FIX32]::FromDouble(0)
+        $frame.Top = [Hr7Twain.TW_FIX32]::FromDouble(0)
+        $frame.Right = [Hr7Twain.TW_FIX32]::FromDouble(2)
+        $frame.Bottom = [Hr7Twain.TW_FIX32]::FromDouble(2)
         $layout = New-Object Hr7Twain.TW_IMAGELAYOUT
-        $layout.Frame = New-Object Hr7Twain.TW_FRAME
-        $layout.Frame.Left = [Hr7Twain.TW_FIX32]::FromDouble(0)
-        $layout.Frame.Top = [Hr7Twain.TW_FIX32]::FromDouble(0)
-        $layout.Frame.Right = [Hr7Twain.TW_FIX32]::FromDouble(2)
-        $layout.Frame.Bottom = [Hr7Twain.TW_FIX32]::FromDouble(2)
+        $layout.Frame = $frame
         $layout.DocumentNumber = [uint32]::MaxValue
         $layout.PageNumber = [uint32]::MaxValue
         $layout.FrameNumber = [uint32]::MaxValue
+        Write-Verbose "Requesting TWAIN frame $($frame.Left.Whole).$($frame.Left.Frac),$($frame.Top.Whole).$($frame.Top.Frac) to $($frame.Right.Whole).$($frame.Right.Frac),$($frame.Bottom.Whole).$($frame.Bottom.Frac) inches."
         $layoutCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 258 -Message 6 -Value $layout -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGELAYOUT')) -ValueTypeName 'Hr7Twain.TW_IMAGELAYOUT'
-        if ($layoutCall.Code -ne 0) { Write-Verbose "TWAIN frame setup returned $($layoutCall.Code); continuing with provider defaults." }
+        if ($layoutCall.Code -eq 2) { Write-Verbose 'TWAIN frame setup returned TWRC_CHECKSTATUS; the provider may have normalized the requested frame.' }
+        elseif ($layoutCall.Code -ne 0) { Write-Verbose "TWAIN frame setup returned $($layoutCall.Code); continuing with the provider frame." }
     }
     else {
-        Write-Verbose 'Skipping capability and frame setup; using provider defaults.'
+        Write-Verbose 'Skipping TWAIN frame setup; using provider default scan area.'
     }
 
     $uiCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 9 -Message 1282 -Value $ui -Size $uiSize -ValueTypeName 'Hr7Twain.TW_USERINTERFACE'
@@ -421,32 +586,41 @@ try {
         Start-Sleep -Milliseconds 50
     }
     if ($null -eq $imageInfo) { throw 'TWAIN source did not report image information before the acquisition deadline.' }
+    $preTransferImageInfo = $imageInfo
     $totalBytes = 0L
     $nonBlankBytes = 0L
     $chunks = 0
+    $minimumIntensity = 255
+    $maximumIntensity = 0
     if ($TransferMode -eq 'Native') {
-        Add-Type -AssemblyName System.Drawing
-        $nativeCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 4 -Message 1 -Value ([IntPtr]::Zero) -Size ([IntPtr]::Size) -ValueTypeName 'System.IntPtr'
-        if ($nativeCall.Code -ne 0 -and $nativeCall.Code -ne 6) { throw "TWAIN DAT_IMAGENATIVEXFER returned code $($nativeCall.Code)." }
-        $hBitmap = [IntPtr]$nativeCall.Value
-        if ($hBitmap -eq [IntPtr]::Zero) { throw 'TWAIN native transfer returned a null bitmap handle.' }
-        $bitmap = $null
-        try {
-            $bitmap = [System.Drawing.Image]::FromHbitmap($hBitmap)
-            $sampleStepX = [Math]::Max(1, [int]($bitmap.Width / 32))
-            $sampleStepY = [Math]::Max(1, [int]($bitmap.Height / 32))
-            for ($y = 0; $y -lt $bitmap.Height; $y += $sampleStepY) {
-                for ($x = 0; $x -lt $bitmap.Width; $x += $sampleStepX) {
-                    $pixel = $bitmap.GetPixel($x, $y)
-                    if ($pixel.R -ne 0 -and $pixel.R -ne 255 -or $pixel.G -ne 0 -and $pixel.G -ne 255 -or $pixel.B -ne 0 -and $pixel.B -ne 255) { $nonBlankBytes++ }
-                }
+        $nativeCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 0x0104 -Message 1 -Value ([IntPtr]::Zero) -Size ([IntPtr]::Size) -ValueTypeName 'System.IntPtr'
+        if ($nativeCall.Code -ne 0 -and $nativeCall.Code -ne 6) {
+            $twainStatus = New-Object Hr7Twain.TW_STATUS
+            $statusCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 8 -Message 1 -Value $twainStatus -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_STATUS')) -ValueTypeName 'Hr7Twain.TW_STATUS'
+            if ($statusCall.Code -eq 0) {
+                throw "TWAIN DAT_IMAGENATIVEXFER returned code $($nativeCall.Code) for $($imageInfo.ImageWidth)x$($imageInfo.ImageLength), pixel type $($imageInfo.PixelType), $($imageInfo.SamplesPerPixel) samples; condition code=$($statusCall.Value.ConditionCode)."
             }
-            $totalBytes = [int64]$bitmap.Width * [int64]$bitmap.Height * [Math]::Max(1, [int]$imageInfo.SamplesPerPixel)
+            throw "TWAIN DAT_IMAGENATIVEXFER returned code $($nativeCall.Code) for $($imageInfo.ImageWidth)x$($imageInfo.ImageLength); DAT_STATUS also failed with code $($statusCall.Code)."
+        }
+        $hDib = [IntPtr]$nativeCall.Value
+        if ($hDib -eq [IntPtr]::Zero) { throw 'TWAIN native transfer returned a null DIB handle.' }
+        try {
+            $dibStats = Get-Hr7DibSampleStats -Handle $hDib
+            $totalBytes = [int64]$dibStats.PixelBytes
+            $nonBlankBytes = [int64]$dibStats.NonblankSamples
             $chunks = 1
+            $minimumIntensity = [int]$dibStats.MinimumIntensity
+            $maximumIntensity = [int]$dibStats.MaximumIntensity
+            Write-Verbose "Validated native DIB: $($dibStats.Width)x$($dibStats.Height), $($dibStats.BitsPerPixel)bpp, $($dibStats.DibBytes) DIB bytes."
+
+            $completedInfo = New-Object Hr7Twain.TW_IMAGEINFO
+            $completedInfo.BitsPerSample = New-Object 'System.Int16[]' 8
+            $completedInfoCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 257 -Message 1 -Value $completedInfo -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGEINFO')) -ValueTypeName 'Hr7Twain.TW_IMAGEINFO'
+            if ($completedInfoCall.Code -eq 0) { $imageInfo = $completedInfoCall.Value }
+            else { Write-Verbose "Post-transfer TWAIN DAT_IMAGEINFO returned $($completedInfoCall.Code); keeping pre-transfer values." }
         }
         finally {
-            if ($bitmap) { $bitmap.Dispose() }
-            [void][Hr7Twain.AcquireNative]::DeleteObject($hBitmap)
+            [Hr7Twain.AcquireNative]::FreeDib($hDib)
         }
     }
     else {
@@ -459,21 +633,37 @@ try {
         try {
             while ($true) {
                 $memory = New-Object Hr7Twain.TW_MEMORY
-                $memory.Flags = 1
+                # TWMF_APPOWNS | TWMF_POINTER; the TWAIN spec requires the
+                # ownership and storage-kind bits together for app memory.
+                $memory.Flags = 0x9
                 $memory.Length = [uint32]$bufferSize
                 $memory.TheMem = $buffer
                 $transfer = New-Object Hr7Twain.TW_IMAGEMEMXFER
+                $transfer.Compression = [uint16]::MaxValue
+                $transfer.BytesPerRow = [uint32]::MaxValue
+                $transfer.Columns = [uint32]::MaxValue
+                $transfer.Rows = [uint32]::MaxValue
+                $transfer.XOffset = [uint32]::MaxValue
+                $transfer.YOffset = [uint32]::MaxValue
+                $transfer.BytesWritten = [uint32]::MaxValue
                 $transfer.Memory = $memory
                 $transferSize = [Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_IMAGEMEMXFER')
                 $transferCall = Invoke-Source -Origin $origin -Source $source -DataGroup 2 -Data 259 -Message 1 -Value $transfer -Size $transferSize -ValueTypeName 'Hr7Twain.TW_IMAGEMEMXFER'
-                if ($transferCall.Code -ne 0 -and $transferCall.Code -ne 6) { throw "TWAIN DAT_IMAGEMEMXFER returned code $($transferCall.Code)." }
+                if ($transferCall.Code -ne 0 -and $transferCall.Code -ne 6) {
+                    $twainStatus = New-Object Hr7Twain.TW_STATUS
+                    $statusCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 8 -Message 1 -Value $twainStatus -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_STATUS')) -ValueTypeName 'Hr7Twain.TW_STATUS'
+                    if ($statusCall.Code -eq 0) {
+                        throw "TWAIN DAT_IMAGEMEMXFER returned code $($transferCall.Code); condition code=$($statusCall.Value.ConditionCode) for $($imageInfo.ImageWidth)x$($imageInfo.ImageLength)."
+                    }
+                    throw "TWAIN DAT_IMAGEMEMXFER returned code $($transferCall.Code); DAT_STATUS also failed with code $($statusCall.Code)."
+                }
                 $transfer = $transferCall.Value
                 $written = [int][Math]::Min([uint32]$bufferSize, $transfer.BytesWritten)
                 if ($written -gt 0) {
                     $chunk = New-Object byte[] $written
                     [Runtime.InteropServices.Marshal]::Copy($buffer, $chunk, 0, $written)
                     $totalBytes += $written
-                    $nonBlankBytes += @($chunk | Where-Object { $_ -ne 0 -and $_ -ne 255 }).Count
+                    $nonBlankBytes += @($chunk | Where-Object { $_ -lt 250 }).Count
                     $chunks++
                 }
                 if ($transferCall.Code -eq 6) { break }
@@ -486,8 +676,22 @@ try {
     $pending = New-Object Hr7Twain.TW_PENDINGXFERS
     $endCall = Invoke-Source -Origin $origin -Source $source -DataGroup 1 -Data 5 -Message 1793 -Value $pending -Size ([Runtime.InteropServices.Marshal]::SizeOf([type]'Hr7Twain.TW_PENDINGXFERS')) -ValueTypeName 'Hr7Twain.TW_PENDINGXFERS'
     if ($endCall.Code -ne 0) { throw "TWAIN MSG_ENDXFER returned code $($endCall.Code)." }
-    if ($nonBlankBytes -le 0) { throw 'TWAIN transfer returned only blank pixels.' }
-    Write-Output "PASS: TWAIN acquired $totalBytes bytes in $chunks $($TransferMode.ToLowerInvariant()) chunks ($($imageInfo.ImageWidth)x$($imageInfo.ImageLength), $PixelMode, ${ResolutionDpi}dpi); nonblank=$nonBlankBytes."
+    if ($nonBlankBytes -le 0 -or ($TransferMode -eq 'Native' -and ($maximumIntensity - $minimumIntensity) -le 5)) { throw 'TWAIN transfer returned only blank or uniform pixels.' }
+    $actualPixelMode = switch ([int]$imageInfo.PixelType) { 0 { 'BW' } 1 { 'Gray' } 2 { 'Color' } default { "TWAIN-$($imageInfo.PixelType)" } }
+    $actualXDpi = [Math]::Round($imageInfo.XResolution.Whole + ($imageInfo.XResolution.Frac / 65536.0), 2)
+    $actualYDpi = [Math]::Round($imageInfo.YResolution.Whole + ($imageInfo.YResolution.Frac / 65536.0), 2)
+    $preTransferXDpi = [Math]::Round($preTransferImageInfo.XResolution.Whole + ($preTransferImageInfo.XResolution.Frac / 65536.0), 2)
+    $preTransferYDpi = [Math]::Round($preTransferImageInfo.YResolution.Whole + ($preTransferImageInfo.YResolution.Frac / 65536.0), 2)
+    $resolutionEvidence = if ($SkipCapabilitySetup) {
+        "TWAIN imageinfo=${actualXDpi}x${actualYDpi}dpi"
+    }
+    elseif ($TransferMode -eq 'Native') {
+        "requested=${ResolutionDpi}dpi, pre-transfer TWAIN imageinfo=${preTransferXDpi}x${preTransferYDpi}dpi, post-transfer=${actualXDpi}x${actualYDpi}dpi"
+    }
+    else {
+        "requested=${ResolutionDpi}dpi, TWAIN imageinfo=${preTransferXDpi}x${preTransferYDpi}dpi"
+    }
+    Write-Output "PASS: TWAIN acquired $totalBytes bytes in $chunks $($TransferMode.ToLowerInvariant()) chunks ($($imageInfo.ImageWidth)x$($imageInfo.ImageLength), $actualPixelMode, $resolutionEvidence); nonblank=$nonBlankBytes."
     [Console]::Out.Flush()
 }
 finally {
