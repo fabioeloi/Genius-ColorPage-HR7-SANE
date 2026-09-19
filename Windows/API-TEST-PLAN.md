@@ -99,9 +99,10 @@ provider log by client bitness and enables verbose logging only in the test
 process. The following client-level acquisitions passed and completed
 `MSG_ENDXFER`:
 
-- x64 native full-page Color: 423x584 pixels at 96 dpi; the DIB contained
-  742,848 pixel bytes and 331 sampled nonblank pixels. The earlier full-bed
-  scan and return were observed to be smooth.
+- x64 native full-page Color: 423x584 pixels; the DIB contained 742,848 pixel
+  bytes and 331 sampled nonblank pixels. Post-transfer TWAIN `DAT_IMAGEINFO`
+  reported 96 dpi, which is not yet cross-checked as the image's sampled
+  resolution. The earlier full-bed scan and return were observed to be smooth.
 - x64 and x86 native Gray preview: each returned a 150x150, 8-bpp DIB with
   1,444 sampled nonblank pixels. The scanner log confirms 75 dpi and a 2-inch
   frame were applied; SANEWinDS returns `TWRC_CHECKSTATUS` for the frame's
