@@ -50,3 +50,8 @@ USB access, acquisition, cancellation, or cleanup.
   setup itself has a trusted Authenticode signature.
 - WiaSane remains a blocked candidate until a binary or reproducible build can
   be retrieved over valid TLS and tested on Windows 10 and Windows 11.
+
+The checked-in `Test-SaneProtocol.ps1` uses the SANEWinDS assembly itself to
+run `Net_Init` and `Net_Get_Devices` against the loopback service. It is a
+transport/provider preflight; it does not substitute for a TWAIN DSM client
+or a WIA COM acquisition test.
