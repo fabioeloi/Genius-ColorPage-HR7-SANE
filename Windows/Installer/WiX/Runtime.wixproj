@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>GeniusColorPageHR7Runtime</OutputName>
+    <MsiVersion Condition="'$(MsiVersion)' == ''">1.0.0</MsiVersion>
+    <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\build\payload</PayloadRoot>
+    <OutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\Runtime\</OutputPath>
+    <IntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\obj\Runtime\</IntermediateOutputPath>
+    <DefineConstants>$(DefineConstants);PayloadRoot=$(PayloadRoot);MsiVersion=$(MsiVersion)</DefineConstants>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Runtime.wxs" />
+  </ItemGroup>
+</Project>

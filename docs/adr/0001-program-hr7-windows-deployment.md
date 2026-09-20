@@ -21,10 +21,10 @@ The HR7 now scans physically through the package's SANE 1.4.0 Plustek backend, b
 | --- | --- |
 | Scanner engine | Preserve SANE 1.4.0 with only the Plustek backend and HR7 USB ID `0458:2013`. |
 | Bridge transport | Use the SANE network protocol on `127.0.0.1:6566` only; confirm the built `saned` supports this bind mode before shipping. |
-| WIA | Start from WiaSane; update or replace only as needed to pass supported Windows/API tests. |
+| WIA | Build a maintained x64 WIA 2.0 stream-based minidriver backed by the loopback SANE service. Install it as a separate software-enumerated WIA scanner instance so the physical USB node can remain on WinUSB. The retrieved WiaSane source is a legacy microdriver and is reference material only; the software-device installation path remains unproven until client tests pass. |
 | TWAIN | Start from SANEWinDS with x86 and x64 data sources; configure its SANE host as loopback. |
 | Driver association | Integrate the libwdi/Zadig-style, per-install device-specific signed WinUSB package. Explain the trust operation and require elevation/consent. |
-| Delivery | One online WiX Burn GUI installer; component versions and hashes pinned; setup Authenticode-signed before public release. |
+| Delivery | One self-contained WiX Burn GUI installer with pinned runtime/TWAIN payloads embedded; hashes recorded; setup Authenticode-signed before public release. |
 | Network | No scanner listener beyond loopback; do not create firewall openings. |
 
 The existing physical test demonstrates the SANE engine and mechanics, not WIA/TWAIN compatibility. Wave 001 records that distinction; API enumeration and real scans remain release gates.
@@ -39,7 +39,7 @@ Deferred fronts stay OUT until a new ADR reopens them:
 | Literal compatibility with every scanner app | Software that does not implement WIA/TWAIN cannot use these providers | Not in this program |
 | macOS behavior changes | Existing macOS path is outside the Windows deployment objective | New ADR if needed |
 | Other scanner IDs, 32-bit Windows, ADF/duplex | Not the tested HR7 x64 flatbed target | New program/ADR |
-| Offline installer or Windows Update driver publication | Online bundle is accepted; device-specific libwdi package is the selected binding method | New ADR if required |
+| Windows Update driver publication | Self-contained Burn bundle is selected; device-specific libwdi package is the selected binding method | New ADR if Windows Update publication is later required |
 
 ## Wave map
 
@@ -74,7 +74,9 @@ Fill slugs and thematic ADRs as waves are chartered (`whw wave new <slug>
 ## References
 
 - `WHY.md`, `README.md`, `README.pt-BR.md`, and `manifest.json`.
-- WiaSane: https://github.com/mback2k/wiasane
+- Microsoft WIA 2.0 driver sample: https://github.com/microsoft/Windows-driver-samples/tree/main/wia/wiadriverex
+- Microsoft WIA architecture and INF guidance: https://learn.microsoft.com/en-us/windows-hardware/drivers/image/wia-architecture-overview and https://learn.microsoft.com/en-us/windows-hardware/drivers/image/inf-files-for-wia-devices
+- WiaSane: https://github.com/mback2k/wiasane (legacy WIA microdriver; not the selected WIA 2.0 provider)
 - SANEWinDS: https://sourceforge.net/projects/sanewinds/
 - libwdi certificate model: https://github.com/pbatard/libwdi/wiki/Certification-Practice-Statement
 - Microsoft WIA: https://learn.microsoft.com/en-us/previous-versions/windows/desktop/wia/-wia-startpage

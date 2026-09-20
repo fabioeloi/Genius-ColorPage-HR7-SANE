@@ -20,7 +20,15 @@ on a connected HR7.
 | --- | --- | --- | --- |
 | TWAIN / SANEWinDS 1.6.9221 | x86 | A TWAIN 2.x-capable x86 client lists `SANEWinDS` and opens its data source. | Query identity/capabilities, acquire a small preview, acquire a full page in Gray and Color, cancel once, then reconnect. |
 | TWAIN / SANEWinDS 1.6.9221 | x64 | A TWAIN 2.x-capable x64 client lists `SANEWinDS` from `twain_64`. | Run the same capability, preview, full-page, cancel, and reconnect cases. |
-| WIA / WiaSane candidate | x64 | `WIA.DeviceManager.DeviceInfos` contains the HR7 provider and selecting it succeeds. | Enumerate `Items`, transfer a preview and a full page, exercise Gray/Color, cancel, and reconnect. |
+| WIA 2.0 / HR7 minidriver | x64 | `WIA.DeviceManager.DeviceInfos` contains exactly one HR7 scanner and connecting to it succeeds. | Enumerate the flatbed item; transfer preview/full-page Gray and Color; verify DPI and crop geometry; exercise brightness/contrast, all advertised rotations, cancellation, and reconnect. |
+
+The selected WIA design is a stream-based x64 WIA 2.0 minidriver backed by the
+already-tested loopback SANE service. Its WIA device instance must be installed
+separately from the physical USB node, which remains associated with WinUSB;
+the software-enumerated WIA instance is an integration hypothesis that must be
+proven on Windows 10 and Windows 11 before the installer adopts it. The
+retrieved WiaSane project is a legacy WIA microdriver, not the selected WIA 2.0
+provider, and is not sufficient evidence for this contract.
 
 For every successful acquisition, the test records provider name, bitness,
 mode, resolution, elapsed time, status code, image dimensions, and a
@@ -48,8 +56,16 @@ USB access, acquisition, cancellation, or cleanup.
 - No public installer until the providers are configured by the GUI package,
   all redistributed binaries have pinned hashes and source/notices, and the
   setup itself has a trusted Authenticode signature.
-- WiaSane remains a blocked candidate until a binary or reproducible build can
-  be retrieved over valid TLS and tested on Windows 10 and Windows 11.
+- The WIA 2.0 minidriver, its software-device installation path, and its
+  enumeration/acquisition behavior must pass on Windows 10 and Windows 11.
+
+`Test-WiaEnumeration.ps1` enumerates devices using the Windows WIA COM API;
+`-AllowNoHr7` records the pre-install zero-device baseline. `Test-WiaAcquire.ps1`
+is the bounded x64 client test: it requests Gray or Color BMP at the selected
+DPI, saves only under the system temporary directory by default, verifies
+dimensions and sampled non-white pixels, and reports the output path. A WIA
+test pass is not recorded until the WIA 2.0 provider is installed and the scan
+is acquired through this API.
 
 The checked-in `Test-SaneProtocol.ps1` uses the SANEWinDS assembly itself to
 run `Net_Init` and `Net_Get_Devices` against the loopback service. It is a
@@ -112,18 +128,28 @@ process. The following client-level acquisitions passed and completed
   75 dpi, with 22,796 and 22,797 nonblank bytes respectively.
 
 The user reports the latest short TWAIN carriage movement and return were
-smooth. WIA is not available on this installation: `WIA.DeviceManager` reports
-zero devices, so the HR7 is still not discoverable to WIA-only applications.
+smooth. On 2026-09-19, `WIA.DeviceManager` again returned zero devices while
+the physical HR7 was present in PnP; the scanner is therefore still not
+discoverable to WIA-only applications. `Test-WiaEnumeration.ps1 -AllowNoHr7`
+records this baseline without changing device state.
 The public [WiaSane source](https://github.com/mback2k/wiasane) was retrieved
 over GitHub TLS at commit `cb38cb469e4dbaed771806d5ca2606baa3086e20`
 (2017-02-19; archive SHA-256
 `900260b6938c24918b80da34116b7683439e0a36b3ae444c593bede75fa927a2`). Its
-README targets Windows 7, WDK 8.0, and Visual Studio 2012. This host has no
-Visual Studio, MSBuild, or WDK toolchain, and no validated WIA binary is
-installed; the author's linked 2016 alpha installer also fails TLS validation
-here with Schannel `SEC_E_WRONG_PRINCIPAL`. No TLS bypass was used and the
-installer was not downloaded or run, so the candidate remains unbuilt and
-unverified here.
+README targets Windows 7, WDK 8.0, and Visual Studio 2012; that legacy
+microdriver remains unselected. The repository now contains an adapted
+stream-based WIA 2.0 source (`Windows/WIA2/`) and a root-enumerated device
+installer helper, but this host has no Visual Studio, MSBuild, or WDK
+toolchain, so neither has been compiled or installed. The WIA baseline remains
+zero devices and there is no WIA acquisition evidence. The old author's
+linked 2016 alpha installer still fails TLS validation here with Schannel
+`SEC_E_WRONG_PRINCIPAL`; no TLS bypass was used and it was not downloaded or
+run.
 Remaining release coverage includes x86 full-page and Color cases,
-cancellation/reconnect cases for both TWAIN bitnesses, a supported WIA
-implementation/acquisition, and the signed end-user installer.
+cancellation/reconnect cases for both TWAIN bitnesses, the x64 WIA 2.0
+minidriver build plus software-device installation and image acquisition, and
+the signed end-user installer. WiX Burn authoring, native helper source, and a
+maintainer build script now exist under `Windows/Installer/`; no GUI installer
+artifact has been emitted. The WDK configuration attempt on this host stopped
+at the Visual Studio UAC prompt (installer error 1602); neither Visual Studio
+nor the Windows SDK/WDK was installed by that attempt.

@@ -1,0 +1,186 @@
+diff --git a/libwdi/.msvc/libwdi_dll.vcxproj b/libwdi/.msvc/libwdi_dll.vcxproj
+--- a/libwdi/.msvc/libwdi_dll.vcxproj
++++ b/libwdi/.msvc/libwdi_dll.vcxproj
+@@ -208,23 +208,6 @@ embedder embedded.h</Command>
+   <ItemGroup>
+     <ResourceCompile Include="..\libwdi.rc" />
+   </ItemGroup>
+-  <ItemGroup>
+-    <ProjectReference Include="embedder.vcxproj">
+-      <Project>{792d44d5-28a7-4eb3-b84b-8021fe3189f9}</Project>
+-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+-    </ProjectReference>
+-    <ProjectReference Include="installer_arm64.vcxproj">
+-      <Project>{6ac16f78-f266-4ae0-bd63-550a55f54c15}</Project>
+-    </ProjectReference>
+-    <ProjectReference Include="installer_x64.vcxproj">
+-      <Project>{e5a56ee0-182f-470f-8cdc-8c1b7b86ee26}</Project>
+-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+-    </ProjectReference>
+-    <ProjectReference Include="installer_x86.vcxproj">
+-      <Project>{9b1c561e-f95b-4849-a7aa-a4350e227c20}</Project>
+-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+-    </ProjectReference>
+-  </ItemGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+   <ImportGroup Label="ExtensionTargets">
+   </ImportGroup>
+diff --git a/libwdi/embedder.h b/libwdi/embedder.h
+--- a/libwdi/embedder.h
++++ b/libwdi/embedder.h
+@@ -23,7 +23,7 @@
+ #error both 32 and 64 bit support have been disabled - check your config.h
+ #endif
+ 
+-#if !defined(WDK_DIR) && !defined(LIBUSB0_DIR) && !defined(USER_DIR) && !defined(LIBUSBK_DIR)
++#if !defined(WDK_DIR) && !defined(LIBUSB0_DIR) && !defined(USER_DIR) && !defined(LIBUSBK_DIR) && !defined(HR7_WINUSB_ONLY)
+ #error at least one of WDK_DIR, LIBUSB0_DIR, LIBUSBK_DIR or USER_DIR must be defined - check your config.h
+ #endif
+ 
+diff --git a/libwdi/winusb.inf.in b/libwdi/winusb.inf.in
+--- a/libwdi/winusb.inf.in
++++ b/libwdi/winusb.inf.in
+@@ -14,46 +14,21 @@
+ Provider    = "libwdi"
+ CatalogFile = #CAT_FILENAME#
+ DriverVer   = #DRIVER_DATE#, #DRIVER_VERSION#
++PnpLockdown = 1
+ 
+-[ClassInstall32]
+-Addreg = WinUSBDeviceClassReg
+-
+-[WinUSBDeviceClassReg]
+-HKR,,,0,"Universal Serial Bus devices"
+-HKR,,Icon,,-20
+-
+ [Manufacturer]
+-%VendorName% = libusbDevice_WinUSB,NTx86,NTamd64,NTarm64
+-
+-[libusbDevice_WinUSB.NTx86]
+-%DeviceName% = USB_Install, USB\%DeviceID%
++%VendorName% = libusbDevice_WinUSB,NTamd64
+ 
+ [libusbDevice_WinUSB.NTamd64]
+ %DeviceName% = USB_Install, USB\%DeviceID%
+ 
+-[libusbDevice_WinUSB.NTarm64]
+-%DeviceName% = USB_Install, USB\%DeviceID%
+-
+ [USB_Install]
+ Include = winusb.inf
+ Needs   = WINUSB.NT
+ 
+ [USB_Install.Services]
+-Include    = winusb.inf
+-AddService = WinUSB,0x00000002,WinUSB_ServiceInstall
+-
+-[WinUSB_ServiceInstall]
+-DisplayName   = "WinUSB - Kernel Driver #DRIVER_DATE# #DRIVER_VERSION#"
+-ServiceType   = 1
+-StartType     = 3
+-ErrorControl  = 1
+-ServiceBinary = %12%\WinUSB.sys
+-
+-[USB_Install.Wdf]
+-KmdfService = WINUSB, WinUsb_Install
+-
+-[WinUSB_Install]
+-KmdfLibraryVersion = #KMDF_VERSION#
++Include = winusb.inf
++Needs   = WINUSB.NT.Services
+ 
+ [USB_Install.HW]
+ AddReg = #USE_DEVICE_INTERFACE_GUID#
+@@ -64,37 +39,3 @@
+ [AddDeviceInterfaceGUID]
+ HKR,,DeviceInterfaceGUIDs,0x10000,%DeviceGUID%
+ 
+-[USB_Install.NTx86.CoInstallers]
+-AddReg    = CoInstallers_AddReg
+-CopyFiles = CoInstallers_CopyFiles
+-
+-[USB_Install.NTamd64.CoInstallers]
+-AddReg    = CoInstallers_AddReg
+-CopyFiles = CoInstallers_CopyFiles
+-
+-[USB_Install.NTarm64.CoInstallers]
+-;
+-
+-[CoInstallers_AddReg]
+-HKR,,CoInstallers32,0x00010000,"WdfCoInstaller#WDF_VERSION#.dll,WdfCoInstaller","WinUSBCoInstaller2.dll"
+-
+-[CoInstallers_CopyFiles]
+-WinUSBCoInstaller2.dll
+-WdfCoInstaller#WDF_VERSION#.dll
+-
+-[DestinationDirs]
+-CoInstallers_CopyFiles = 11
+-
+-[SourceDisksNames]
+-1 = %SourceName%
+-
+-[SourceDisksFiles.x86]
+-WinUSBCoInstaller2.dll = 1,x86
+-WdfCoInstaller#WDF_VERSION#.dll = 1,x86
+-
+-[SourceDisksFiles.amd64]
+-WinUSBCoInstaller2.dll = 1,amd64
+-WdfCoInstaller#WDF_VERSION#.dll = 1,amd64
+-
+-[SourceDisksFiles.arm64]
+-;
+diff --git a/msvc/config.h b/msvc/config.h
+--- a/msvc/config.h
++++ b/msvc/config.h
+@@ -15,16 +15,8 @@
+ #pragma warning(disable:6387)
+ #endif
+ 
+-/*
+- * Embed WinUSB driver files from the following WDK location.
+- * If needed, you can obtain the WDK redistributable components from:
+- * https://go.microsoft.com/fwlink/p/?LinkID=253170
+- * NB: You must also make sure the WDF_VER, COINSTALLER_DIR and X64_DIR
+- * match your WinUSB redist directories.
+- */
+-#ifndef WDK_DIR
+-#define WDK_DIR "C:/Program Files (x86)/Windows Kits/8.0"
+-#endif
++/* HR7 product build: WinUSB is in-box on Windows 10 and later. Do not embed
++ * the legacy WDF/WinUSB co-installers or unrelated libusb0/libusbK drivers. */
+ 
+ /* WDK WDF coinstaller version */
+ #define WDF_VER 1011
+@@ -35,30 +27,12 @@
+ /* 64bit subdirectory for WinUSB redist files ("x64" or "amd64") */
+ #define X64_DIR "x64"
+ 
+-/* embed libusb0 driver files from the following location */
+-#ifndef LIBUSB0_DIR
+-#define LIBUSB0_DIR "D:/libusb-win32"
+-#endif
+-
+-/* embed libusbK driver files from the following location */
+-#ifndef LIBUSBK_DIR
+-#define LIBUSBK_DIR "D:/libusbK/bin"
+-#endif
+-
+-/* embed user defined driver files from the following location */
+-#ifndef USER_DIR
+-// #define USER_DIR "C:/signed-driver"
+-#endif
+-
+-/* 32 bit support */
+-#define OPT_M32
++/* Use the x64 installer on x64 Windows, the supported product target. */
++#define HR7_WINUSB_ONLY
+ 
+ /* 64 bit support */
+ #define OPT_M64
+ 
+-/* ARM64 support */
+-#define OPT_ARM
+-
+ /* Debug message logging */
+ //#define ENABLE_DEBUG_LOGGING
+ 

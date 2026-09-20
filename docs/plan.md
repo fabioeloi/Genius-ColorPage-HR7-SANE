@@ -10,7 +10,8 @@ Provide a signed, no-script GUI install that exposes the known-good HR7 SANE eng
 
 - Preserve SANE 1.4.0 Plustek and the confirmed `0458:2013` USB identity.
 - Keep SANE network transport on `127.0.0.1:6566` only; WIA and TWAIN are separate app-facing sources.
-- Candidate bridges are WiaSane (WIA) and SANEWinDS (TWAIN x86/x64); validate old WIA code on Win10/11 and comply with each component's license.
+- Use a maintained, stream-based x64 WIA 2.0 minidriver backed by the loopback SANE service; WiaSane's retrieved source is a legacy microdriver and is not the selected provider. Keep the physical USB node bound to WinUSB and prove the separate software-enumerated WIA node before packaging it.
+- Use SANEWinDS for TWAIN x86/x64 and comply with each component's license.
 - Use the disclosed libwdi/Zadig-style per-device WinUSB package flow and a trusted Authenticode signature for the public setup. No signing certificate is present locally; release signing depends on the owner obtaining one.
 - Apps supporting neither WIA nor TWAIN are out of scope; a dual-API app may display both sources.
 
@@ -34,25 +35,25 @@ Documentation-first baseline. Record the current physical SANE proof and the gap
 
 ### Wave 002 — windows-scan-apis
 
-Build and validate the loopback SANE service plus WIA and TWAIN sources. Implement the smallest necessary WiaSane modernization/replacement, configure SANEWinDS x86/x64, and prove enumeration and page acquisition with API test clients. No public installer claim before both API paths pass.
+Build and validate the loopback SANE service plus WIA and TWAIN sources. Implement a WIA 2.0 x64 minidriver and prove its separate WIA device installation path, enumeration, and page acquisition; configure SANEWinDS x86/x64 and prove it with API test clients. No public installer claim before both API paths pass.
 
 | # | What | How | Why | Where | When | Who | How much |
 |---|------|-----|-----|-------|------|-----|----------|
 | A | Plan service and provider contracts | Pin component versions, endpoint, bitness, and API test cases | Keep provider behavior consistent | Windows source/build/config | 002 | Planner | planning/wave-002-windows-scan-apis.todos.sql (wave002-A) |
-| B | Implement local saned and both providers | Bind only to loopback; add WIA HR7 and TWAIN x86/x64 configuration | Make ordinary Windows scanning clients discover the HR7 | Windows source/build/config | 002 | Builder | planning/wave-002-windows-scan-apis.todos.sql (wave002-B) |
+| B | Implement local saned and both providers | Bind only to loopback; add WIA 2.0 software-device support and TWAIN x86/x64 configuration | Make ordinary Windows scanning clients discover the HR7 without replacing its physical WinUSB transport | Windows source/build/config | 002 | Builder | planning/wave-002-windows-scan-apis.todos.sql (wave002-B) |
 | C | Verify both API paths and physical output | Test enumeration, preview/final, grayscale/color, cancellation, reconnect, and nonblank page capture | Prove the APIs, not just SANE CLI behavior | API test clients and connected HR7 | 002 | Evaluator | planning/wave-002-windows-scan-apis.todos.sql (wave002-C) |
 | D | Record API/licensing decision | Add versions, results, required notices/source, and remaining risk to ADR | Preserve reviewable evidence | docs/adr and SOURCES-AND-LICENSES.md | 002 | Maintainer | planning/wave-002-windows-scan-apis.todos.sql (wave002-D) |
 | E | Close API wave | Run WHW close only with all bridge tests green | Gate installer work on working providers | WHW state and wave close hook | 002 | Closer | planning/wave-002-windows-scan-apis.todos.sql (wave002-E) |
 
 ### Wave 003 — gui-installer
 
-Deliver one online GUI installer with the targeted WinUSB association, explicit UAC/trust consent, pinned component hashes, WIA/TWAIN configuration, rollback, repair, and uninstall. Preserve previous driver state where Windows permits. Keep diagnostic and user scan data out of the installer and repo.
+Deliver one self-contained GUI installer with the targeted WinUSB association, explicit UAC/trust consent, pinned and embedded component hashes, WIA/TWAIN configuration, rollback, repair, and uninstall. Preserve previous driver state where Windows permits. End-user installation must not depend on runtime or TWAIN package downloads. Keep diagnostic and user scan data out of the installer and repo.
 
 | # | What | How | Why | Where | When | Who | How much |
 |---|------|-----|-----|-------|------|-----|----------|
 | A | Define bundle and state transitions | Specify first install, existing binding backup, repair, upgrade, rollback, and uninstall | Avoid destructive or ambiguous device changes | Windows installer design | 003 | Planner | planning/wave-003-gui-installer.todos.sql (wave003-A) |
-| B | Build the WiX Burn GUI package | Download pinned components, verify hashes/signatures, configure services/providers, and offer repair/removal | Remove end-user command-line/Zadig steps | Windows installer project | 003 | Builder | planning/wave-003-gui-installer.todos.sql (wave003-B) |
-| C | Verify install lifecycle and security boundary | Test fresh/repeat/failure/uninstall; inspect driver binding, cert consent, service account, listener, and firewall | Ensure setup is safe and reversible | disposable Windows test host | 003 | Evaluator | planning/wave-003-gui-installer.todos.sql (wave003-C) |
+| B | Build the WiX Burn GUI package | Stage/fetch pinned maintainer inputs, verify hashes/signatures, embed payloads, configure services/providers, and offer repair/removal | Remove end-user command-line/Zadig steps and install-time dependency on external package hosts | Windows installer project | 003 | Builder | planning/wave-003-gui-installer.todos.sql (wave003-B) |
+| C | Verify install lifecycle and security boundary | Test fresh/repeat/failure/uninstall; reject missing/corrupt staged payloads; inspect driver binding, cert consent, service account, listener, and firewall | Ensure setup is safe and reversible | disposable Windows test host | 003 | Evaluator | planning/wave-003-gui-installer.todos.sql (wave003-C) |
 | D | Record installer and signing status | Add hashes, signing model, rollback results, and external certificate dependency | Prevent unsigned artifacts from being presented as release-ready | docs/adr and manifest.json | 003 | Maintainer | planning/wave-003-gui-installer.todos.sql (wave003-D) |
 | E | Close installer wave | Run WHW close after lifecycle tests and PR gates are green | Freeze the install contract before clean-PC release tests | WHW state and wave close hook | 003 | Closer | planning/wave-003-gui-installer.todos.sql (wave003-E) |
 
@@ -70,4 +71,8 @@ Test clean Windows 11 x64 and best-effort Windows 10 22H2 x64, x86/x64 TWAIN cli
 
 ## Next
 
-Complete the Wave 001 documentation/feasibility checks, then begin bridge implementation only after its decision and gates record the conditions above.
+Continue the Wave 002/003 verification work: compile the WIA provider and install helper with the Windows SDK/WDK, prove its software-device enumeration and physical Gray/Color acquisitions, then build and lifecycle-test the Burn bundle on a disposable Windows host. Do not close either wave or publish a package while those gates, source/licensing review, and Windows driver-catalog signing are unresolved.
+
+## Current implementation snapshot
+
+TWAIN has provider-level evidence recorded above: x86/x64 source enumeration and open, Gray preview through both transfer modes, and x64 full-page Color native transfer. The WIA 2.0 source has now been adapted to acquire through the loopback SANE service, and source for the software-device installer and WiX Burn GUI bundle has been added. These files have not been compiled on this host: MSBuild/WDK and WiX are unavailable, no signing certificate is present, no WIA acquisition has passed, and no GUI installer artifact exists. Installer requirements, input contract, and current release blockers are documented in [Windows/Installer/README.md](../Windows/Installer/README.md).

@@ -12,6 +12,10 @@ Windows/dist/
 Windows/stage/
 Windows/Artifacts/
 Windows/.cache/
+.vs/
+**/bin/
+**/obj/
+*.vcxproj.user
 .tools/
 node_modules/
 .whw/.npm-cache/

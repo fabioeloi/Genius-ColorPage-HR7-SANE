@@ -34,6 +34,24 @@
       "verification": "SHA-256 and Valid Authenticode signature in Configure-HR7-Driver.ps1"
     },
     {
+      "id": "microsoft-wia-driver-sample",
+      "version": "3c3fb49073c047c4cc8e6c203c6331f62b426507",
+      "url": "https://github.com/microsoft/Windows-driver-samples/tree/3c3fb49073c047c4cc8e6c203c6331f62b426507/wia/wiadriverex",
+      "source_revision": "3c3fb49073c047c4cc8e6c203c6331f62b426507",
+      "architecture": "x64",
+      "license": "MS-PL",
+      "verification": "Pinned Microsoft WIA 2.0 stream-transfer sample adapted in source under Windows/WIA2; not compiled, INF/catalog not signed, and no WIA enumeration or acquisition has been verified"
+    },
+    {
+      "id": "wiasane-winsane-client",
+      "version": "cb38cb469e4dbaed771806d5ca2606baa3086e20",
+      "url": "https://github.com/mback2k/wiasane/tree/cb38cb469e4dbaed771806d5ca2606baa3086e20",
+      "source_revision": "cb38cb469e4dbaed771806d5ca2606baa3086e20",
+      "sha256": "900260b6938c24918b80da34116b7683439e0a36b3ae444c593bede75fa927a2",
+      "license": "MIT-style notice; sane.h public domain notice",
+      "verification": "Only the WINSANE SANE-network client subset is reused in Windows/WIA2; the legacy WiaSane microdriver is not used. Source is not compiled or installed."
+    },
+    {
       "id": "sanewinds-x64",
       "version": "1.6.9221",
       "url": "https://sourceforge.net/projects/sanewinds/files/SANEWinDS_1.6.9221_x64.msi/download",

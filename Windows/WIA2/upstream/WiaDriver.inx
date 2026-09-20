@@ -1,0 +1,61 @@
+; WIA 2.0 minidriver package for the Genius ColorPage-HR7 software device.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Image
+ClassGUID={6bdd1fc6-810f-11d0-bec7-08002be2092f}
+Provider=%ProviderString%
+DriverVer=09/20/2026,1.0.0.4
+CatalogFile=GeniusColorPageHR7Wia.cat
+PnpLockdown=1
+
+[SourceDisksFiles]
+wiadriverex.dll=1
+
+[SourceDisksNames]
+1=%Location%,,,
+
+[DestinationDirs]
+DefaultDestDir=13
+
+[Manufacturer]
+%ManufacturerName%=Models,NTamd64.10.0...16299
+
+[Models.NTamd64.10.0...16299]
+%HR7.DeviceDesc%=WIADRIVER.Device,ROOT\GENIUSCOLORPAGEHR7WIA
+
+[WIADRIVER.Device]
+Include=sti.inf
+Needs=STI.SerialSection
+PortSelect=no
+SubClass=StillImage
+DeviceType=1
+DeviceSubType=0x1
+Capabilities=0x30
+DeviceData=WIADRIVER.DeviceData
+AddReg=WIADRIVER.AddReg
+CopyFiles=WIADRIVER.CopyFiles
+ICMProfiles="sRGB Color Space Profile.icm"
+
+[WIADRIVER.Device.Services]
+Include=sti.inf
+Needs=STI.SerialSection.Services
+
+[WIADRIVER.DeviceData]
+StoragePath=%13%
+
+[WIADRIVER.AddReg]
+HKR,,HardwareConfig,1,1
+HKR,,USDClass,,"{EEA1E6F7-A59C-487a-BFFA-BD8AA99FE503}"
+HKCR,CLSID\{EEA1E6F7-A59C-487a-BFFA-BD8AA99FE503},,,"Genius ColorPage-HR7 WIA 2.0 Driver"
+HKCR,CLSID\{EEA1E6F7-A59C-487a-BFFA-BD8AA99FE503}\InProcServer32,,0x00020000,%13%\wiadriverex.dll
+HKCR,CLSID\{EEA1E6F7-A59C-487a-BFFA-BD8AA99FE503}\InProcServer32,ThreadingModel,,"Both"
+
+[WIADRIVER.CopyFiles]
+wiadriverex.dll
+
+[Strings]
+ManufacturerName="Genius"
+ProviderString="Genius ColorPage-HR7 project"
+Location="Genius ColorPage-HR7 WIA driver package"
+HR7.DeviceDesc="Genius ColorPage-HR7 (WIA 2.0)"

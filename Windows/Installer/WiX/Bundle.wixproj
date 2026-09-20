@@ -1,0 +1,20 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>GeniusColorPageHR7Setup</OutputName>
+    <BundleVersion Condition="'$(BundleVersion)' == ''">1.0.0.4</BundleVersion>
+    <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\build\payload</PayloadRoot>
+    <RuntimeMsiPath Condition="'$(RuntimeMsiPath)' == ''">$(PayloadRoot)\packages\GeniusColorPageHR7Runtime.msi</RuntimeMsiPath>
+    <OutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\Bundle\</OutputPath>
+    <IntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\obj\Bundle\</IntermediateOutputPath>
+    <DefineConstants>$(DefineConstants);PayloadRoot=$(PayloadRoot);RuntimeMsiPath=$(RuntimeMsiPath);BundleVersion=$(BundleVersion)</DefineConstants>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Bundle.wxs" />
+    <PackageReference Include="WixToolset.BootstrapperApplications.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

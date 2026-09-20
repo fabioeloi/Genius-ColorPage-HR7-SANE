@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle Name="Genius ColorPage-HR7 scanner support"
+          Manufacturer="Fabio Eloi"
+          Version="$(var.BundleVersion)"
+          UpgradeCode="{95F29C17-0F9F-4428-B844-B5A5BD905A37}"
+          AboutUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE"
+          HelpUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE/issues"
+          Compressed="yes"
+          Condition="VersionNT64 &gt;= v10.0.0.0">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLargeLicense"
+                                              LicenseUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE/blob/main/SOURCES-AND-LICENSES.md"
+                                              ShowVersion="yes"
+                                              SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <Variable Name="HR7InstallFolder"
+              Type="formatted"
+              Value="[ProgramFiles64Folder]\Genius\ColorPage-HR7"
+              Persisted="yes"
+              bal:Overridable="yes" />
+
+    <util:RegistrySearch Id="DetectHr7WinUsb"
+                         Root="HKLM"
+                         Key="SOFTWARE\Genius\ColorPage-HR7\WinUSB"
+                         Value="InstalledVersion"
+                         Variable="HR7WinUsbInstalled"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectHr7SaneService"
+                         Root="HKLM"
+                         Key="SOFTWARE\Genius\ColorPage-HR7\SANE"
+                         Value="InstalledVersion"
+                         Variable="HR7SaneServiceInstalled"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectHr7Wia"
+                         Root="HKLM"
+                         Key="SOFTWARE\Genius\ColorPage-HR7\WIA"
+                         Value="InstalledVersion"
+                         Variable="HR7WiaInstalled"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectHr7TwainConfig"
+                         Root="HKLM"
+                         Key="SOFTWARE\Genius\ColorPage-HR7\TWAIN"
+                         Value="InstalledVersion"
+                         Variable="HR7TwainConfigInstalled"
+                         Result="exists"
+                         Bitness="always64" />
+
+    <Chain DisableRollback="no" DisableSystemRestore="no">
+      <ExePackage Id="Hr7WinUsb"
+                  DisplayName="Genius HR7 WinUSB device binding"
+                  SourceFile="$(var.PayloadRoot)\tools\WinUsbBinding.exe"
+                  Name="tools\WinUsbBinding.exe"
+                  InstallArguments="install"
+                  RepairArguments="install"
+                  UninstallArguments="remove"
+                  DetectCondition="HR7WinUsbInstalled"
+                  PerMachine="yes"
+                  Vital="yes">
+        <Payload Name="tools\libwdi.dll" SourceFile="$(var.PayloadRoot)\tools\libwdi.dll" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <MsiPackage Id="Hr7Runtime"
+                  DisplayName="Genius ColorPage-HR7 SANE and WIA runtime"
+                  SourceFile="$(var.RuntimeMsiPath)"
+                  Name="GeniusColorPageHR7Runtime.msi"
+                  Compressed="yes"
+                  ForcePerMachine="yes"
+                  Vital="yes">
+        <MsiProperty Name="INSTALLFOLDER" Value="[HR7InstallFolder]" />
+      </MsiPackage>
+
+      <ExePackage Id="Hr7SaneService"
+                  DisplayName="Genius HR7 loopback SANE service"
+                  SourceFile="$(var.PayloadRoot)\tools\SaneServiceManager.exe"
+                  Name="tools\SaneServiceManager.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]&quot;"
+                  DetectCondition="HR7SaneServiceInstalled"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <MsiPackage Id="SaneWinDsX86"
+                  DisplayName="SANEWinDS TWAIN data source (32-bit)"
+                  SourceFile="$(var.PayloadRoot)\third-party\SANEWinDS_1.6.9221_x86.msi"
+                  Name="SANEWinDS_1.6.9221_x86.msi"
+                  Compressed="yes"
+                  ForcePerMachine="yes"
+                  RepairCondition="0"
+                  Vital="yes">
+        <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
+      </MsiPackage>
+
+      <MsiPackage Id="SaneWinDsX64"
+                  DisplayName="SANEWinDS TWAIN data source (64-bit)"
+                  SourceFile="$(var.PayloadRoot)\third-party\SANEWinDS_1.6.9221_x64.msi"
+                  Name="SANEWinDS_1.6.9221_x64.msi"
+                  Compressed="yes"
+                  ForcePerMachine="yes"
+                  RepairCondition="0"
+                  Vital="yes">
+        <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
+      </MsiPackage>
+
+      <ExePackage Id="Hr7TwainConfig"
+                  DisplayName="SANEWinDS per-user configuration"
+                  SourceFile="$(var.PayloadRoot)\tools\TwainConfigManager.exe"
+                  Name="tools\TwainConfigManager.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]&quot;"
+                  DetectCondition="HR7TwainConfigInstalled"
+                  PerMachine="yes"
+                  Vital="yes" />
+
+      <ExePackage Id="Hr7WiaDevice"
+                  DisplayName="Genius ColorPage-HR7 WIA 2.0 device"
+                  SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
+                  Name="tools\InstallHr7WiaDevice.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  DetectCondition="HR7WiaInstalled"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+    </Chain>
+  </Bundle>
+</Wix>

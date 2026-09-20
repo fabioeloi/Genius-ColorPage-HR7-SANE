@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Genius ColorPage-HR7 Windows runtime"
+           Manufacturer="Fabio Eloi"
+           Version="$(var.MsiVersion)"
+           UpgradeCode="{2AE2E9DB-55A4-4C31-A49D-8D74F55D7D4B}"
+           Scope="perMachine"
+           InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer Genius ColorPage-HR7 runtime is already installed."
+                  Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="GeniusFolder" Name="Genius">
+          <Directory Id="INSTALLFOLDER" Name="ColorPage-HR7">
+            <Directory Id="RuntimeFolder" Name="runtime">
+            </Directory>
+            <Directory Id="WiaFolder" Name="WIA">
+            </Directory>
+            <Directory Id="ConfigFolder" Name="config">
+            </Directory>
+            <Directory Id="LicenseFolder" Name="Licenses">
+            </Directory>
+            <Directory Id="DocsFolder" Name="Documentation">
+            </Directory>
+          <Component Id="InstallRegistration" Guid="{6B715137-0C56-443A-8D5B-080C0B8F2BE5}" Bitness="always64">
+            <RegistryValue Root="HKLM"
+                           Key="SOFTWARE\Genius\ColorPage-HR7\Install"
+                           Name="InstallFolder"
+                           Type="string"
+                           Value="[INSTALLFOLDER]"
+                           KeyPath="yes" />
+            <RegistryValue Root="HKLM"
+                           Key="SOFTWARE\Genius\ColorPage-HR7\Install"
+                           Name="RuntimeVersion"
+                           Type="string"
+                           Value="$(var.MsiVersion)" />
+            <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="Genius ColorPage-HR7 scanner support" Level="1">
+      <ComponentRef Id="InstallRegistration" />
+      <Files Include="$(var.PayloadRoot)\runtime\**" Directory="RuntimeFolder" />
+      <Files Include="$(var.PayloadRoot)\WIA\**" Directory="WiaFolder" />
+      <Files Include="$(var.PayloadRoot)\config\**" Directory="ConfigFolder" />
+      <Files Include="$(var.PayloadRoot)\Licenses\**" Directory="LicenseFolder" />
+      <Files Include="$(var.PayloadRoot)\Documentation\**" Directory="DocsFolder" />
+    </Feature>
+  </Package>
+</Wix>
