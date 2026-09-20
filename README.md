@@ -14,6 +14,8 @@ Until the GUI installer is released, use the existing platform-specific instruct
 
 This repository uses [WHW](https://github.com/fabioeloi/WHW) for intent, decisions, wave planning, evidence, and gates. See `WHY.md`, `docs/plan.md`, `docs/adr/`, and `planning/`. Device scans, diagnostic logs, build outputs, and signing keys are excluded from version control.
 
+[FORGE](https://github.com/fabioeloi/FORGE) is referenced only as an example of a separate public project; this repository is not generated from it and does not use its files or history as a template or dependency.
+
 ## Sources and licenses
 
 See [SOURCES-AND-LICENSES.md](SOURCES-AND-LICENSES.md) and `manifest.json` for component versions, hashes, origins, and license notices.
