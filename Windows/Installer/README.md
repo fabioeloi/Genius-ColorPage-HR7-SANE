@@ -78,11 +78,13 @@ artifact. Build outputs and intermediate files stay under the ignored
 WiX, and staged-libwdi paths so previous files are preserved rather than
 overwritten. The `release-artifacts.json` file records all nine Burn attachment
 hashes, predecessor provenance, and an exported public signing-certificate
-sidecar. That `.cer` contains no private key. On the Windows 11 evaluation PC,
-import it through the Certificates MMC snap-in into **Local Computer** >
-**Trusted Root Certification Authorities** and **Trusted Publishers** before
-running setup. This creates trust on that PC only; it is not Microsoft signing
-or public Windows trust. Never distribute the signing private key.
+sidecar. That `.cer` contains no private key. On each evaluation PC that must
+validate or run this private build (the Windows 10 build/test PC first, then
+the Windows 11 target), import it through the Certificates MMC snap-in into
+**Local Computer** > **Trusted Root Certification Authorities** and
+**Trusted Publishers** before rebuilding or running setup. This creates trust
+on that PC only; it is not Microsoft signing or public Windows trust. Never
+distribute the signing private key.
 
 ## Validation status
 
