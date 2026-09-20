@@ -13,7 +13,11 @@ param(
     [ValidatePattern('^[0-9A-Fa-f]{40}$')]
     [string] $SigningCertificateThumbprint,
 
-    [string] $BundleVersion = '1.0.0.4',
+    [string] $BundleVersion = '1.0.0.5',
+    [string] $RuntimeMsiVersion = '1.0.5',
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $PreviousBundlePath,
     [string] $SaneWinDsPackageRoot,
     [string] $SignToolPath,
     [string] $Inf2CatPath,
@@ -288,21 +292,60 @@ function Assert-AuthenticodeSignature {
 }
 
 $version = [version]$BundleVersion
-if ($version.Build -lt 0 -or $version.Revision -lt 0) {
+if ($BundleVersion -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $version.Build -lt 0 -or $version.Revision -lt 0) {
     throw 'BundleVersion must have four numeric fields, for example 1.0.0.4.'
 }
-if ($BundleVersion -ne '1.0.0.4') {
-    throw 'The WIA installer helper and WIA INF are currently pinned to 1.0.0.4. Update those version constants and the WIA DriverVer together before building a different release version.'
+if ($BundleVersion -ne '1.0.0.5') {
+    throw 'This migration build is pinned to bundle 1.0.0.5 and the signed 1.0.0.4 predecessor. Update the migration artifact, helper/INF versions, and lifecycle tests together before changing it.'
+}
+$msiVersion = [version]$RuntimeMsiVersion
+if ($RuntimeMsiVersion -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$' -or
+    $msiVersion.Major -gt 255 -or $msiVersion.Minor -gt 255 -or $msiVersion.Build -gt 65535) {
+    throw 'RuntimeMsiVersion must be a valid three-field Windows Installer product version.'
+}
+if ($RuntimeMsiVersion -ne '1.0.5') {
+    throw 'The 1.0.0.5 migration must advance the runtime MSI from 1.0.0 to 1.0.5.'
 }
 if ($AllowUntrustedEvaluationSigning -and -not $AllowUnreleasedEvaluationBuild) {
     throw '-AllowUntrustedEvaluationSigning is permitted only together with -AllowUnreleasedEvaluationBuild for a private evaluation artifact.'
 }
 $script:UntrustedEvaluationRootAccepted = $false
-$msiVersion = '{0}.{1}.{2}' -f $version.Major, $version.Minor, $version.Build
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $windowsRoot = Join-Path $repoRoot 'Windows'
 $buildRoot = Join-Path $windowsRoot 'build'
 New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+
+# The previous full Burn setup removed packages from its replacement because
+# Burn executes related-bundle upgrades after the current chain. Embed only the
+# exact released 1.0.0.4 bundle admitted by its build manifest and pinned digest.
+$previousBundleVersion = '1.0.0.4'
+$previousBundleExpectedSha256 = '97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c'
+$previousBundleExpectedSigner = '4E086470415F86AEAB2B55B06D5190B49C9ED2B7'
+$previousBundlePath = [IO.Path]::GetFullPath($PreviousBundlePath)
+if (-not (Test-Path -LiteralPath $previousBundlePath -PathType Leaf)) {
+    throw "The signed 1.0.0.4 migration bundle was not found: $previousBundlePath"
+}
+$previousBundleManifestPath = Join-Path (Split-Path -Parent $previousBundlePath) 'release-artifacts.json'
+if (-not (Test-Path -LiteralPath $previousBundleManifestPath -PathType Leaf)) {
+    throw "The predecessor release manifest is required beside the bundle: $previousBundleManifestPath"
+}
+$previousBundleManifest = Get-Content -LiteralPath $previousBundleManifestPath -Raw | ConvertFrom-Json
+if ([string]$previousBundleManifest.bundle_version -cne $previousBundleVersion -or
+    [string]$previousBundleManifest.bundle.sha256 -ine $previousBundleExpectedSha256 -or
+    [string]$previousBundleManifest.signing_certificate_thumbprint -ine $previousBundleExpectedSigner) {
+    throw 'The predecessor release manifest is not the pinned signed 1.0.0.4 release.'
+}
+$previousBundleActualSha256 = Get-Sha256 -Path $previousBundlePath
+if ($previousBundleActualSha256 -ine $previousBundleExpectedSha256) {
+    throw "The predecessor setup SHA-256 is not the pinned 1.0.0.4 release: $previousBundleActualSha256"
+}
+$previousBundleSignature = Get-AuthenticodeSignature -LiteralPath $previousBundlePath
+if ($previousBundleSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+    -not $previousBundleSignature.SignerCertificate -or
+    $previousBundleSignature.SignerCertificate.Thumbprint -ine $previousBundleExpectedSigner) {
+    throw 'The predecessor setup must have a valid Authenticode signature from the pinned local-evaluation signer.'
+}
+
 $saneWinDsPackageSource = if ($SaneWinDsPackageRoot) {
     [IO.Path]::GetFullPath($SaneWinDsPackageRoot)
 } else {
@@ -415,8 +458,21 @@ if (Test-Path -LiteralPath $stageRoot) {
 }
 $payloadRoot = Join-Path $stageRoot 'payload'
 New-Item -ItemType Directory -Path $OutputDirectory, $payloadRoot | Out-Null
-foreach ($directoryName in @('runtime', 'WIA', 'config', 'Licenses', 'Documentation', 'tools', 'third-party', 'packages')) {
+$evaluationCertificatePath = Join-Path $OutputDirectory 'GeniusColorPageHR7-Evaluation-CodeSigning.cer'
+Export-Certificate -Cert $certificateMatches[0] -FilePath $evaluationCertificatePath -Type CERT | Out-Null
+$exportedEvaluationCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($evaluationCertificatePath)
+if ($exportedEvaluationCertificate.Thumbprint -ine $SigningCertificateThumbprint -or
+    $exportedEvaluationCertificate.HasPrivateKey) {
+    throw 'The exported evaluation certificate must match the signer and must not contain a private key.'
+}
+$evaluationCertificateSha256 = Get-Sha256 -Path $evaluationCertificatePath
+foreach ($directoryName in @('runtime', 'WIA', 'config', 'Licenses', 'Documentation', 'tools', 'third-party', 'packages', 'migration')) {
     New-Item -ItemType Directory -Path (Join-Path $payloadRoot $directoryName) | Out-Null
+}
+$stagedPreviousBundlePath = Join-Path $payloadRoot 'migration\GeniusColorPageHR7Setup-1.0.0.4.exe'
+Copy-Item -LiteralPath $previousBundlePath -Destination $stagedPreviousBundlePath
+if ((Get-Sha256 -Path $stagedPreviousBundlePath) -ine $previousBundleExpectedSha256) {
+    throw 'The staged migration bundle changed during copy; refusing to create the Burn package.'
 }
 
 Copy-TreeContents -Source $runtimeSource -Destination (Join-Path $payloadRoot 'runtime')
@@ -442,24 +498,67 @@ if (-not (Test-Path -LiteralPath $libwdiBuildScript -PathType Leaf) -or
     -not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
     throw 'The pinned libwdi build script or Windows PowerShell 5.1 executable is missing.'
 }
+$gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+$gitPath = if ($gitCommand) { $gitCommand.Source } else { Join-Path $env:ProgramFiles 'Git\cmd\git.exe' }
+if (-not (Test-Path -LiteralPath $gitPath -PathType Leaf)) {
+    throw 'Git is required to make an isolated working copy of the pinned libwdi source.'
+}
+$stagedLibwdiRoot = Join-Path $stageRoot 'libwdi-source'
+Invoke-Checked -FilePath $gitPath -Arguments @('clone', '--shared', $libwdiRootPath, $stagedLibwdiRoot) `
+    -Description 'Create an isolated working copy of the pinned libwdi source'
+$expectedLibwdiPatchFiles = @(
+    'libwdi/.msvc/libwdi_dll.vcxproj',
+    'libwdi/embedder.h',
+    'libwdi/winusb.inf.in',
+    'msvc/config.h'
+)
+$libwdiWorkingTreeStatus = @(& $gitPath -C $libwdiRootPath status --porcelain --untracked-files=all)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect local libwdi source changes.' }
+if ($libwdiWorkingTreeStatus.Count -gt 0) {
+    $actualLibwdiChangedFiles = @($libwdiWorkingTreeStatus | ForEach-Object { $_.Substring(3).Replace('\', '/') } | Sort-Object)
+    $expectedLibwdiChangedFiles = @($expectedLibwdiPatchFiles | Sort-Object)
+    if ([string]::Join('|', $actualLibwdiChangedFiles) -cne [string]::Join('|', $expectedLibwdiChangedFiles) -or
+        @($libwdiWorkingTreeStatus | Where-Object { $_.Substring(0, 2) -cne ' M' }).Count -gt 0) {
+        throw 'The libwdi source has local changes outside the four pinned HR7 patch files. Preserve and review them before building.'
+    }
+    $libwdiPatchPath = Join-Path $PSScriptRoot 'libwdi-1.5.1-hr7-x64.patch'
+    & $gitPath -C $libwdiRootPath apply --reverse --check $libwdiPatchPath *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The libwdi source changes are not the complete pinned HR7 WinUSB-only patch. Preserve and review them before building.'
+    }
+    foreach ($relativePatchFile in $expectedLibwdiPatchFiles) {
+        $sourceFile = Join-Path $libwdiRootPath ($relativePatchFile.Replace('/', '\'))
+        $stagedFile = Join-Path $stagedLibwdiRoot ($relativePatchFile.Replace('/', '\'))
+        Copy-Item -LiteralPath $sourceFile -Destination $stagedFile -Force
+    }
+}
 Invoke-Checked -FilePath $powerShell -Arguments @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $libwdiBuildScript,
-    '-LibwdiRoot', $libwdiRootPath,
+    '-LibwdiRoot', $stagedLibwdiRoot,
     '-MSBuildPath', $msbuild
 ) -Description 'Build the pinned HR7 x64 libwdi dependency'
 
+$toolOutput = Join-Path $stageRoot 'tools-build'
+$toolIntermediateRoot = Join-Path $stageRoot 'tools-obj'
+New-Item -ItemType Directory -Path $toolOutput, $toolIntermediateRoot | Out-Null
 $nativeProjects = @(
-    @{ Path = (Join-Path $windowsRoot 'Installer\WinUsbBinding.vcxproj'); Extra = @("/p:LibwdiRoot=$libwdiRootPath") },
+    @{ Path = (Join-Path $windowsRoot 'Installer\WinUsbBinding.vcxproj'); Extra = @("/p:LibwdiRoot=$stagedLibwdiRoot") },
     @{ Path = (Join-Path $windowsRoot 'Installer\SaneServiceManager.vcxproj'); Extra = @() },
     @{ Path = (Join-Path $windowsRoot 'Installer\TwainConfigManager.vcxproj'); Extra = @() },
     @{ Path = (Join-Path $windowsRoot 'WIA2\Installer\InstallHr7WiaDevice.vcxproj'); Extra = @() }
 )
 foreach ($project in $nativeProjects) {
-    Invoke-Checked -FilePath $msbuild -Arguments (@($project.Path, '/m:1', '/t:Rebuild', '/p:Configuration=Release', '/p:Platform=x64') + $project.Extra) `
+    $projectName = [IO.Path]::GetFileNameWithoutExtension($project.Path)
+    $projectIntermediate = Join-Path $toolIntermediateRoot $projectName
+    New-Item -ItemType Directory -Path $projectIntermediate | Out-Null
+    $projectArguments = @(
+        $project.Path, '/m:1', '/t:Rebuild', '/p:Configuration=Release', '/p:Platform=x64',
+        "/p:OutDir=$toolOutput\", "/p:IntDir=$projectIntermediate\"
+    ) + $project.Extra
+    Invoke-Checked -FilePath $msbuild -Arguments $projectArguments `
         -Description "Build $([IO.Path]::GetFileNameWithoutExtension($project.Path))"
 }
 
-$toolOutput = Join-Path $windowsRoot 'build\installer'
 $helperFiles = @(
     @{ Name = 'WinUsbBinding.exe'; Source = (Join-Path $toolOutput 'WinUsbBinding.exe') },
     @{ Name = 'libwdi.dll'; Source = (Join-Path $toolOutput 'libwdi.dll') },
@@ -479,6 +578,9 @@ foreach ($helper in $helperFiles) {
 # Build the x64 WIA minidriver, stage only its INF/DLL/catalog, then sign the
 # catalog as one package. Do not register this software device on the build PC.
 $wiaProject = Join-Path $windowsRoot 'WIA2\upstream\wiadriverex.vcxproj'
+$wiaBuildOutput = Join-Path $stageRoot 'wia-build-output'
+$wiaBuildIntermediate = Join-Path $stageRoot 'wia-obj'
+New-Item -ItemType Directory -Path $wiaBuildOutput, $wiaBuildIntermediate | Out-Null
 $wiaBuildArguments = @(
     $wiaProject,
     '/m:1', '/t:Build',
@@ -487,12 +589,13 @@ $wiaBuildArguments = @(
     "/p:PlatformToolset=v143",
     "/p:WindowsTargetPlatformVersion=$WindowsSdkVersion",
     "/p:SDK_INC_PATH=$sdkUm",
-    "/p:DDK_INC_PATH=$sdkShared"
+    "/p:DDK_INC_PATH=$sdkShared",
+    "/p:OutDir=$wiaBuildOutput\",
+    "/p:IntDir=$wiaBuildIntermediate\"
 )
 Invoke-Checked -FilePath $msbuild -Arguments $wiaBuildArguments `
     -Description 'Build the HR7 WIA 2.0 minidriver'
-$wiaBuildOutput = Join-Path $windowsRoot 'build\wia\x64\Release'
-$wiaInfSource = Join-Path $wiaBuildOutput 'GeniusColorPageHR7Wia.inf'
+$wiaInfSource = Join-Path $wiaBuildIntermediate 'GeniusColorPageHR7Wia.inf'
 $wiaDllSource = Join-Path $wiaBuildOutput 'wiadriverex.dll'
 $wiaInfTemplate = Join-Path $windowsRoot 'WIA2\upstream\WiaDriver.inx'
 if (-not (Test-Path -LiteralPath $wiaDllSource -PathType Leaf)) {
@@ -511,15 +614,20 @@ $requiredInfEntries = @(
 foreach ($requiredInfEntry in $requiredInfEntries) {
     if ($wiaInfText -notmatch $requiredInfEntry) { throw "WIA INF template is missing a required x64 device/package entry: $requiredInfEntry" }
 }
+$wiaHelperSource = Get-Content -LiteralPath (Join-Path $windowsRoot 'WIA2\Installer\InstallHr7WiaDevice.cpp') -Raw
+$expectedHelperVersion = '(?m)^\s*const wchar_t kPackageVersion\[\] = L"' + [regex]::Escape($BundleVersion) + '";\s*$'
+if ($wiaHelperSource -notmatch $expectedHelperVersion) {
+    throw "WIA installer helper version must remain synchronized with bundle version $BundleVersion."
+}
 if ($wiaInfText -notmatch '(?im)^%ManufacturerName%=Models,NTamd64(?:\.|\s|$)') {
     throw 'WIA INF template does not declare the x64 manufacturer model section.'
 }
-if ($wiaInfText -notmatch '(?im)^DriverVer=[^,\r\n]+,1\.0\.0\.4\s*$') {
-    throw 'WIA INF DriverVer must remain synchronized with bundle version 1.0.0.4.'
+if ($wiaInfText -notmatch "(?im)^DriverVer=[^,\r\n]+,$([regex]::Escape($BundleVersion))\s*$") {
+    throw "WIA INF DriverVer must remain synchronized with bundle version $BundleVersion."
 }
 New-Item -ItemType Directory -Path $wiaBuildOutput -Force | Out-Null
 $wiaInfDate = Get-Date -Format 'MM/dd/yyyy'
-$wiaInfText = [regex]::Replace($wiaInfText, '(?im)^DriverVer=[^,\r\n]+,1\.0\.0\.4\s*$', "DriverVer=$wiaInfDate,1.0.0.4")
+$wiaInfText = [regex]::Replace($wiaInfText, "(?im)^DriverVer=[^,\r\n]+,$([regex]::Escape($BundleVersion))\s*$", "DriverVer=$wiaInfDate,$BundleVersion")
 [IO.File]::WriteAllText($wiaInfSource, $wiaInfText, [Text.Encoding]::ASCII)
 $wiaPackage = Join-Path $stageRoot 'wia-package'
 New-Item -ItemType Directory -Path $wiaPackage | Out-Null
@@ -590,10 +698,13 @@ if ($sanewindsX86PatchedHash -eq $sanewindsX86OriginalHash) {
 
 $runtimeWixProject = Join-Path $PSScriptRoot 'WiX\Runtime.wixproj'
 $bundleWixProject = Join-Path $PSScriptRoot 'WiX\Bundle.wixproj'
-$runtimeMsi = Join-Path $windowsRoot 'build\wix\Runtime\GeniusColorPageHR7Runtime.msi'
+$runtimeWixOutput = Join-Path $stageRoot 'wix-runtime-output'
+$runtimeWixIntermediate = Join-Path $stageRoot 'wix-runtime-obj'
+$runtimeMsi = Join-Path $runtimeWixOutput 'GeniusColorPageHR7Runtime.msi'
 Invoke-Checked -FilePath $dotnet -Arguments @(
     'build', $runtimeWixProject, '-c', 'Release', '-t:Rebuild',
-    "-p:PayloadRoot=$payloadRoot", "-p:MsiVersion=$msiVersion"
+    "-p:PayloadRoot=$payloadRoot", "-p:MsiVersion=$RuntimeMsiVersion",
+    "-p:OutputPath=$runtimeWixOutput\", "-p:IntermediateOutputPath=$runtimeWixIntermediate\"
 ) -Description 'Build the x64 runtime MSI'
 if (-not (Test-Path -LiteralPath $runtimeMsi -PathType Leaf)) { throw "Runtime MSI was not produced: $runtimeMsi" }
 Sign-AndVerify -Path $runtimeMsi -SignTool $signTool -Thumbprint $SigningCertificateThumbprint -TimestampUrl 'http://timestamp.digicert.com' `
@@ -601,13 +712,18 @@ Sign-AndVerify -Path $runtimeMsi -SignTool $signTool -Thumbprint $SigningCertifi
 $runtimeCopy = Join-Path $payloadRoot 'packages\GeniusColorPageHR7Runtime.msi'
 Copy-Item -LiteralPath $runtimeMsi -Destination $runtimeCopy
 
+$bundleWixOutput = Join-Path $stageRoot 'wix-bundle-output'
+$bundleWixIntermediate = Join-Path $stageRoot 'wix-bundle-obj'
 Invoke-Checked -FilePath $dotnet -Arguments @(
     'build', $bundleWixProject, '-c', 'Release', '-t:Rebuild',
     "-p:PayloadRoot=$payloadRoot",
     "-p:RuntimeMsiPath=$runtimeCopy",
+    "-p:PreviousBundlePath=$stagedPreviousBundlePath",
+    "-p:OutputPath=$bundleWixOutput\",
+    "-p:IntermediateOutputPath=$bundleWixIntermediate\",
     "-p:BundleVersion=$BundleVersion"
 ) -Description 'Build the WiX Burn GUI bootstrapper'
-$unsignedBundle = Join-Path $windowsRoot 'build\wix\Bundle\GeniusColorPageHR7Setup.exe'
+$unsignedBundle = Join-Path $bundleWixOutput 'GeniusColorPageHR7Setup.exe'
 if (-not (Test-Path -LiteralPath $unsignedBundle -PathType Leaf)) { throw "Burn bundle was not produced: $unsignedBundle" }
 
 # WiX/MSBuild incremental checks do not account for all command-line payload
@@ -621,7 +737,8 @@ $expectedBundlePayloads = @(
     (Join-Path $payloadRoot 'third-party\SANEWinDS_1.6.9221_x86.msi'),
     (Join-Path $payloadRoot 'third-party\SANEWinDS_1.6.9221_x64.msi'),
     (Join-Path $payloadRoot 'tools\TwainConfigManager.exe'),
-    (Join-Path $payloadRoot 'tools\InstallHr7WiaDevice.exe')
+    (Join-Path $payloadRoot 'tools\InstallHr7WiaDevice.exe'),
+    $stagedPreviousBundlePath
 )
 $expectedBundleHashes = @($expectedBundlePayloads | ForEach-Object {
     if (-not (Test-Path -LiteralPath $_ -PathType Leaf)) { throw "Expected Burn payload is missing: $_" }
@@ -657,8 +774,17 @@ if ($actualBundleHashes.Count -ne $expectedBundleHashes.Count -or
 
 $releaseRecord = [ordered]@{
     bundle_version = $BundleVersion
-    msi_version = $msiVersion
+    msi_version = $RuntimeMsiVersion
     bundle = [ordered]@{ path = $finalBundle; sha256 = (Get-Sha256 $finalBundle) }
+    previous_bundle = [ordered]@{
+        version = $previousBundleVersion
+        path = $previousBundlePath
+        sha256 = $previousBundleActualSha256
+        signing_certificate_thumbprint = $previousBundleExpectedSigner
+        embedded_in_bundle = $true
+        chain_position = 1
+        behavior = 'uninstalled before the current runtime and provider helpers; detect-only related-bundle registration prevents duplicate late uninstall'
+    }
     runtime_msi = [ordered]@{ path = $runtimeCopy; sha256 = (Get-Sha256 $runtimeCopy); embedded_in_bundle = $true }
     bundle_payload_verification = [ordered]@{
         extracted_attachment_count = $actualBundleHashes.Count
@@ -672,6 +798,12 @@ $releaseRecord = [ordered]@{
     }
     sanewinds_x64_sha256 = Get-Sha256 (Join-Path $payloadRoot 'third-party\SANEWinDS_1.6.9221_x64.msi')
     signing_certificate_thumbprint = $SigningCertificateThumbprint
+    evaluation_certificate = [ordered]@{
+        public_certificate_path = $evaluationCertificatePath
+        public_certificate_sha256 = $evaluationCertificateSha256
+        thumbprint = $SigningCertificateThumbprint
+        trust_scope = 'local machine only; certificate is not trusted by arbitrary Windows installations'
+    }
     signing_trust_validation = if ($script:UntrustedEvaluationRootAccepted) {
         'PRIVATE EVALUATION: expected Authenticode signer and signature digests were checked; the root is not trusted here, so the package is not install-ready'
     } else {

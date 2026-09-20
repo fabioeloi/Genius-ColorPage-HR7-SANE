@@ -3,12 +3,13 @@
     <OutputType>Bundle</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
     <OutputName>GeniusColorPageHR7Setup</OutputName>
-    <BundleVersion Condition="'$(BundleVersion)' == ''">1.0.0.4</BundleVersion>
+    <BundleVersion Condition="'$(BundleVersion)' == ''">1.0.0.5</BundleVersion>
     <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\build\payload</PayloadRoot>
     <RuntimeMsiPath Condition="'$(RuntimeMsiPath)' == ''">$(PayloadRoot)\packages\GeniusColorPageHR7Runtime.msi</RuntimeMsiPath>
+    <PreviousBundlePath Condition="'$(PreviousBundlePath)' == ''">$(PayloadRoot)\migration\GeniusColorPageHR7Setup-1.0.0.4.exe</PreviousBundlePath>
     <OutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\Bundle\</OutputPath>
     <IntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\obj\Bundle\</IntermediateOutputPath>
-    <DefineConstants>$(DefineConstants);PayloadRoot=$(PayloadRoot);RuntimeMsiPath=$(RuntimeMsiPath);BundleVersion=$(BundleVersion)</DefineConstants>
+    <DefineConstants>$(DefineConstants);PayloadRoot=$(PayloadRoot);RuntimeMsiPath=$(RuntimeMsiPath);PreviousBundlePath=$(PreviousBundlePath);BundleVersion=$(BundleVersion)</DefineConstants>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>

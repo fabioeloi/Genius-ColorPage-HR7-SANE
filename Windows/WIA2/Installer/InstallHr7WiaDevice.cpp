@@ -20,7 +20,7 @@ namespace
     const wchar_t kGeneratedInstanceName[] = L"GENIUSCOLORPAGEHR7WIA";
     const wchar_t kDeviceName[] = L"Genius ColorPage-HR7 (WIA 2.0)";
     const wchar_t kInfFileName[] = L"GeniusColorPageHR7Wia.inf";
-    const wchar_t kPackageVersion[] = L"1.0.0.4";
+    const wchar_t kPackageVersion[] = L"1.0.0.5";
     const wchar_t kRegistryPath[] = L"SOFTWARE\\Genius\\ColorPage-HR7\\WIA";
     const wchar_t kVersionValue[] = L"InstalledVersion";
 

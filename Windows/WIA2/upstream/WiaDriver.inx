@@ -5,7 +5,7 @@ Signature="$WINDOWS NT$"
 Class=Image
 ClassGUID={6bdd1fc6-810f-11d0-bec7-08002be2092f}
 Provider=%ProviderString%
-DriverVer=09/20/2026,1.0.0.4
+DriverVer=09/20/2026,1.0.0.5
 CatalogFile=GeniusColorPageHR7Wia.cat
 PnpLockdown=1
 

@@ -10,6 +10,12 @@
           HelpUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE/issues"
           Compressed="yes"
           Condition="VersionNT64 &gt;= v10.0.0.0">
+    <!-- The prior release's uninstaller removes helper packages after a normal
+         related-bundle upgrade. Detect it here, but remove it explicitly as
+         the first chain package below so the new packages cannot be removed
+         by late related-bundle cleanup. -->
+    <RelatedBundle Id="{95F29C17-0F9F-4428-B844-B5A5BD905A37}" Action="Detect" />
+
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLargeLicense"
                                               LicenseUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE/blob/main/SOURCES-AND-LICENSES.md"
@@ -53,6 +59,14 @@
                          Bitness="always64" />
 
     <Chain DisableRollback="no" DisableSystemRestore="no">
+      <BundlePackage Id="Hr7PreviousBundle"
+                     DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.4 (migration cleanup)"
+                     SourceFile="$(var.PreviousBundlePath)"
+                     Name="migration\GeniusColorPageHR7Setup-1.0.0.4.exe"
+                     InstallCondition="0"
+                     Compressed="yes"
+                     Vital="yes" />
+
       <ExePackage Id="Hr7WinUsb"
                   DisplayName="Genius HR7 WinUSB device binding"
                   SourceFile="$(var.PayloadRoot)\tools\WinUsbBinding.exe"

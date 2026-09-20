@@ -7,14 +7,28 @@ runtime/service, SANEWinDS TWAIN sources for x86 and x64 applications, and the
 WIA 2.0 software-device package. Apps that support neither WIA nor TWAIN are
 outside the compatibility scope.
 
-The bundle is self-contained: the runtime MSI and both pinned SANEWinDS MSIs
-are embedded in the setup EXE, so end-user installation does not need GitHub or
-SourceForge access. Maintainer builds take the SANEWinDS packages from the
-hash-checked `.tools/downloads` cache (or fetch the pinned HTTPS URLs when the
-cache is absent). The upstream x86 MSI omits its platform in Template Summary;
-the build changes only the staged copy to `Intel;1033`, assigns it a stable new
-PackageCode, and records the original and packaged hashes in
-`release-artifacts.json`.
+The bundle is self-contained: the runtime MSI, both pinned SANEWinDS MSIs, and
+the exact supported predecessor bundle are embedded in the setup EXE, so
+end-user installation does not need GitHub or SourceForge access. Maintainer
+builds take the SANEWinDS packages from the hash-checked `.tools/downloads`
+cache (or fetch the pinned HTTPS URLs when the cache is absent). The upstream
+x86 MSI omits its platform in Template Summary; the build changes only the
+staged copy to `Intel;1033`, assigns it a stable new PackageCode, and records
+the original and packaged hashes in `release-artifacts.json`.
+
+The 1.0.0.5 migration includes the signed 1.0.0.4 setup as the first Burn chain
+package, with an uninstall-only condition. The older bundle is also declared
+detect-only; this prevents Burn's normal late related-bundle upgrade removal
+from running after the new provider helpers have been installed. The old
+bundle's version, SHA-256, and signer are pinned and checked against its
+`release-artifacts.json` before staging. Burn rollback is enabled, but the
+removed predecessor's restoration after a later package failure has not yet
+been exercised and remains a lifecycle-test requirement. The MSI version
+advances independently to 1.0.5 so the changed WIA payload is not mistaken for
+the already-installed 1.0.0 MSI.
+This intentionally makes the migration EXE larger (the predecessor is about
+46 MB); future installer updates must repeat a tested uninstall-first handoff
+for their supported predecessor or provide an equally safe migration design.
 
 WinUSB is changed only for USB `0458:2013`. If that device already uses
 WinUSB, setup records that existing binding as unowned and leaves it alone.
@@ -33,6 +47,8 @@ keeps later user edits alongside the hidden backup.
   WIA headers/libraries, `Inf2Cat.exe`, and `SignTool.exe`.
 - WiX Toolset 5.0.2 (`wix.exe` and the matching SDK packages).
 - A current Authenticode code-signing certificate with its private key.
+- The exact signed 1.0.0.4 bundle and its adjacent `release-artifacts.json`
+  manifest, as `PreviousBundlePath`.
 - A trimmed, redistributable SANE/Cygwin runtime tree supplied as
   `RuntimeRoot`; it must contain the service binaries/configuration and no
   compiler, development headers, import/static libraries, or debug artifacts.
@@ -48,17 +64,25 @@ Example maintainer invocation:
   -RuntimeRoot 'C:\staging\hr7-runtime' `
   -LibwdiRoot 'C:\staging\libwdi-1.5.1' `
   -ComplianceRoot 'C:\staging\hr7-compliance' `
-  -SigningCertificateThumbprint 'REPLACE_WITH_40_HEX_DIGIT_THUMBPRINT'
+  -SigningCertificateThumbprint 'REPLACE_WITH_40_HEX_DIGIT_THUMBPRINT' `
+  -RuntimeMsiVersion '1.0.5' `
+  -PreviousBundlePath 'C:\staging\release-1.0.0.4\GeniusColorPageHR7Setup.exe'
 ```
 
 Private evaluation builds may omit the approval file only with
 `-AllowUnreleasedEvaluationBuild`; that output is explicitly marked evaluation
-only. The current source pins helper metadata and the WIA INF to version
-`1.0.0.4`. Build outputs and intermediate files stay under the ignored
-`Windows/build/` directory. Each run gets a unique `release-1.0.0.4-<build-id>`
-and matching staging directory so failed or prior builds are preserved rather
-than overwritten. The `release-artifacts.json` file records output hashes; it
-is evidence, not a substitute for clean-host installation tests.
+only. The migration source pins the bundle and WIA helper/INF to `1.0.0.5`,
+the runtime MSI to `1.0.5`, and the predecessor input to the signed `1.0.0.4`
+artifact. Build outputs and intermediate files stay under the ignored
+`Windows/build/` directory. Each run gets unique output, native-helper, WIA,
+WiX, and staged-libwdi paths so previous files are preserved rather than
+overwritten. The `release-artifacts.json` file records all nine Burn attachment
+hashes, predecessor provenance, and an exported public signing-certificate
+sidecar. That `.cer` contains no private key. On the Windows 11 evaluation PC,
+import it through the Certificates MMC snap-in into **Local Computer** >
+**Trusted Root Certification Authorities** and **Trusted Publishers** before
+running setup. This creates trust on that PC only; it is not Microsoft signing
+or public Windows trust. Never distribute the signing private key.
 
 ## Validation status
 
@@ -118,10 +142,33 @@ had not loaded `System.Drawing`; that harness issue is fixed by explicitly
 loading the assembly. The saved image was then validated directly with the same
 pixel-sampling check.
 
-The known full-bundle upgrade cleanup issue remains unresolved: a prior Burn
-upgrade removed packages installed by its replacement. To protect the now
-working local setup, version `1.0.0.4` was applied WIA-only; its full Burn bundle
-was not installed. Before Windows 11 deployment, validate full-bundle clean
-install, upgrade, repair, and uninstall on a disposable Windows 10 test host.
-Public distribution still needs third-party redistribution review and a signing
-path accepted by arbitrary Windows machines.
+The owner subsequently installed the full signed 1.0.0.4 Burn setup; NAPS2
+listed the scanner and a full scan completed with smooth carriage travel and
+return. The exact NAPS2 acquisition API was not recorded. Separately, the
+TWAIN API test clients enumerate and acquire through both x86 and x64 sources,
+while `Windows/Test-WiaEnumeration.ps1` currently finds no WIA device after the
+full-bundle installation. This is consistent with the observed Burn defect:
+the prior related-bundle uninstall ran after the new chain and removed the WIA
+helper registration. Do not treat the NAPS2 result as WIA-specific evidence.
+
+The 1.0.0.5 setup has now been built on Windows 10 as a private local-evaluation
+artifact at
+`Windows/build/release-1.0.0.5-179e96db4ac74cdb8b3d5e8b6b78587a/`. Its
+SHA-256 is
+`b2a1b1ceb24ead3e1732a112fb085d898c7323bf2b8fddca4d837f8513d2d7fa` and it is
+92,234,152 bytes. MSBuild compiled all helpers and the WIA provider, Inf2Cat
+reported no errors or warnings, WiX 5.0.2 completed with zero warnings/errors,
+and Burn extraction verified nine attachment hashes. The MSI database reports
+ProductVersion `1.0.5`; the embedded predecessor hash is
+`97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c`. Its
+manifest records the local signer thumbprint and public `.cer` sidecar.
+
+This candidate is **not install-ready yet**: Windows reports Authenticode
+`UnknownError` because the new signer is not yet trusted in this PC's Local
+Machine root/publisher stores. The non-exportable private key remains in the
+builder's certificate store; the public sidecar has no private key. After
+local trust is configured, rebuild or re-verify it, then install and test the
+1.0.0.4-to-1.0.0.5 migration, WIA enumeration/acquisition, TWAIN x86/x64,
+rollback, repair, uninstall, and loopback-only service before Windows 11
+deployment. Public distribution still needs third-party redistribution review
+and a signing path accepted by arbitrary Windows machines.
