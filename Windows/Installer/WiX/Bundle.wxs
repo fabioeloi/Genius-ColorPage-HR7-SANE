@@ -10,10 +10,10 @@
           HelpUrl="https://github.com/fabioeloi/Genius-ColorPage-HR7-SANE/issues"
           Compressed="yes"
           Condition="VersionNT64 &gt;= v10.0.0.0">
-    <!-- The prior release's uninstaller removes helper packages after a normal
-         related-bundle upgrade. Detect it here, but remove it explicitly as
-         the first chain package below so the new packages cannot be removed
-         by late related-bundle cleanup. -->
+    <!-- Keep related-bundle processing detect-only. Burn's BundlePackage
+         dependency planner can suppress explicit predecessor cleanup, so the
+         exact signed predecessor setup EXEs are invoked as generic one-shot
+         uninstall packages after SANEWinDS dependency registration. -->
     <RelatedBundle Id="{95F29C17-0F9F-4428-B844-B5A5BD905A37}" Action="Detect" />
 
     <BootstrapperApplication>
@@ -34,6 +34,41 @@
                          Key="SOFTWARE\Genius\ColorPage-HR7\WinUSB"
                          Value="InstalledVersion"
                          Variable="HR7WinUsbInstalled"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectPreviousBundle004"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{0A271906-E40B-4D13-97A8-05EE28E68B9A}"
+                         Value="DisplayVersion"
+                         Variable="HR7PreviousBundle004Installed"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectPreviousBundle005"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{478CD29C-718B-40C8-8EAB-A33DC7C0977B}"
+                         Value="DisplayVersion"
+                         Variable="HR7PreviousBundle005Installed"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectPreviousBundle006"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{D4295A21-3F19-4273-9A2F-CC75F98A732D}"
+                         Value="DisplayVersion"
+                         Variable="HR7PreviousBundle006Installed"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectStrandedBundle007"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{9DCF6485-774B-405A-BBAB-731310A7CB7D}"
+                         Value="DisplayVersion"
+                         Variable="HR7StrandedBundle007Installed"
+                         Result="exists"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="DetectRecoveryBundle008"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{DA668E3C-0B7E-4E13-83BF-0F525DE30EAE}"
+                         Value="DisplayVersion"
+                         Variable="HR7RecoveryBundle008Installed"
                          Result="exists"
                          Bitness="always64" />
     <util:RegistrySearch Id="DetectHr7SaneService"
@@ -59,51 +94,10 @@
                          Bitness="always64" />
 
     <Chain DisableRollback="no" DisableSystemRestore="no">
-      <BundlePackage Id="Hr7PreviousBundle"
-                     DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.4 (migration cleanup)"
-                     SourceFile="$(var.PreviousBundlePath)"
-                     Name="migration\GeniusColorPageHR7Setup-1.0.0.4.exe"
-                     InstallCondition="0"
-                     Compressed="yes"
-                     Vital="yes" />
-
-      <ExePackage Id="Hr7WinUsb"
-                  DisplayName="Genius HR7 WinUSB device binding"
-                  SourceFile="$(var.PayloadRoot)\tools\WinUsbBinding.exe"
-                  Name="tools\WinUsbBinding.exe"
-                  InstallArguments="install"
-                  RepairArguments="install"
-                  UninstallArguments="remove"
-                  DetectCondition="HR7WinUsbInstalled"
-                  PerMachine="yes"
-                  Vital="yes">
-        <Payload Name="tools\libwdi.dll" SourceFile="$(var.PayloadRoot)\tools\libwdi.dll" />
-        <ExitCode Value="3010" Behavior="scheduleReboot" />
-      </ExePackage>
-
-      <MsiPackage Id="Hr7Runtime"
-                  DisplayName="Genius ColorPage-HR7 SANE and WIA runtime"
-                  SourceFile="$(var.RuntimeMsiPath)"
-                  Name="GeniusColorPageHR7Runtime.msi"
-                  Compressed="yes"
-                  ForcePerMachine="yes"
-                  Vital="yes">
-        <MsiProperty Name="INSTALLFOLDER" Value="[HR7InstallFolder]" />
-      </MsiPackage>
-
-      <ExePackage Id="Hr7SaneService"
-                  DisplayName="Genius HR7 loopback SANE service"
-                  SourceFile="$(var.PayloadRoot)\tools\SaneServiceManager.exe"
-                  Name="tools\SaneServiceManager.exe"
-                  InstallArguments="install &quot;[HR7InstallFolder]&quot;"
-                  RepairArguments="install &quot;[HR7InstallFolder]&quot;"
-                  UninstallArguments="remove &quot;[HR7InstallFolder]&quot;"
-                  DetectCondition="HR7SaneServiceInstalled"
-                  PerMachine="yes"
-                  Vital="yes">
-        <ExitCode Value="3010" Behavior="scheduleReboot" />
-      </ExePackage>
-
+      <!-- Register the new bundle as a SANEWinDS dependent first. Install the
+           new runtime before invoking legacy bundle uninstallers: their WIA
+           helpers need an INF at the shared install path. Reinstall this
+           bundle's helpers after cleanup because old bundles remove them. -->
       <MsiPackage Id="SaneWinDsX86"
                   DisplayName="SANEWinDS TWAIN data source (32-bit)"
                   SourceFile="$(var.PayloadRoot)\third-party\SANEWinDS_1.6.9221_x86.msi"
@@ -126,6 +120,165 @@
         <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
       </MsiPackage>
 
+      <MsiPackage Id="Hr7Runtime"
+                  DisplayName="Genius ColorPage-HR7 SANE and WIA runtime"
+                  SourceFile="$(var.RuntimeMsiPath)"
+                  Name="GeniusColorPageHR7Runtime.msi"
+                  Compressed="yes"
+                  ForcePerMachine="yes"
+                  Vital="yes">
+        <MsiProperty Name="INSTALLFOLDER" Value="[HR7InstallFolder]" />
+      </MsiPackage>
+
+      <!-- Each historical bundle's WIA uninstall helper removes the staged
+           driver package. Re-stage the current WIA package before every
+           predecessor cleanup so later helpers never try to remove an absent
+           INF package. The final helper below leaves the current version live. -->
+      <ExePackage Id="Hr7WiaBefore006"
+                  DisplayName="Prepare WIA package for 1.0.0.6 cleanup"
+                  CacheId="HR7WiaBefore006_1_0_0_10"
+                  SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
+                  Name="tools\InstallHr7WiaDevice-prepare-006.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  DetectCondition="0"
+                  InstallCondition="HR7PreviousBundle006Installed"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <ExePackage Id="Hr7PreviousBundle"
+                  DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.6 (migration cleanup)"
+                  SourceFile="$(var.PreviousBundlePath)"
+                  Name="migration\GeniusColorPageHR7Setup-1.0.0.6.exe"
+                  Bundle="no"
+                  Protocol="none"
+                  InstallArguments="-quiet -norestart"
+                  UninstallArguments="-quiet -norestart -uninstall -burn.related.upgrade"
+                  DetectCondition="HR7PreviousBundle006Installed"
+                  InstallCondition="0"
+                  Compressed="yes"
+                  PerMachine="yes"
+                  Vital="yes" />
+
+      <ExePackage Id="Hr7WiaBefore005"
+                  DisplayName="Prepare WIA package for 1.0.0.5 cleanup"
+                  CacheId="HR7WiaBefore005_1_0_0_10"
+                  SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
+                  Name="tools\InstallHr7WiaDevice-prepare-005.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  DetectCondition="0"
+                  InstallCondition="HR7PreviousBundle005Installed"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <ExePackage Id="Hr7IntermediateBundle"
+                  DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.5 (migration cleanup)"
+                  SourceFile="$(var.IntermediateBundlePath)"
+                  Name="migration\GeniusColorPageHR7Setup-1.0.0.5.exe"
+                  Bundle="no"
+                  Protocol="none"
+                  InstallArguments="-quiet -norestart"
+                  UninstallArguments="-quiet -norestart -uninstall -burn.related.upgrade"
+                  DetectCondition="HR7PreviousBundle005Installed"
+                  InstallCondition="0"
+                  Compressed="yes"
+                  PerMachine="yes"
+                  Vital="yes" />
+
+      <ExePackage Id="Hr7WiaBefore004"
+                  DisplayName="Prepare WIA package for 1.0.0.4 cleanup"
+                  CacheId="HR7WiaBefore004_1_0_0_10"
+                  SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
+                  Name="tools\InstallHr7WiaDevice-prepare-004.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  DetectCondition="0"
+                  InstallCondition="HR7PreviousBundle004Installed"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <ExePackage Id="Hr7LegacyBundle"
+                  DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.4 (migration cleanup)"
+                  SourceFile="$(var.LegacyBundlePath)"
+                  Name="migration\GeniusColorPageHR7Setup-1.0.0.4.exe"
+                  Bundle="no"
+                  Protocol="none"
+                  InstallArguments="-quiet -norestart"
+                  UninstallArguments="-quiet -norestart -uninstall -burn.related.upgrade"
+                  DetectCondition="HR7PreviousBundle004Installed"
+                  InstallCondition="0"
+                  Compressed="yes"
+                  PerMachine="yes"
+                  Vital="yes" />
+
+      <ExePackage Id="Hr7WiaBefore007"
+                  DisplayName="Prepare WIA package for 1.0.0.7 cleanup"
+                  CacheId="HR7WiaBefore007_1_0_0_10"
+                  SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
+                  Name="tools\InstallHr7WiaDevice-prepare-007.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
+                  DetectCondition="0"
+                  InstallCondition="HR7StrandedBundle007Installed"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <!-- Remove 1.0.0.7 last: its own migration packages may still detect
+           1.0.0.6, so the older registrations must be cleared first. -->
+      <ExePackage Id="Hr7StrandedBundle"
+                  DisplayName="Genius ColorPage-HR7 scanner support 1.0.0.7 (recovery cleanup)"
+                  SourceFile="$(var.StrandedBundlePath)"
+                  Name="migration\GeniusColorPageHR7Setup-1.0.0.7.exe"
+                  Bundle="no"
+                  Protocol="none"
+                  InstallArguments="-quiet -norestart"
+                  UninstallArguments="-quiet -norestart -uninstall -burn.related.upgrade"
+                  DetectCondition="HR7StrandedBundle007Installed"
+                  InstallCondition="0"
+                  Compressed="yes"
+                  PerMachine="yes"
+                  Vital="yes" />
+
+      <ExePackage Id="Hr7WinUsb"
+                  DisplayName="Genius HR7 WinUSB device binding"
+                  SourceFile="$(var.PayloadRoot)\tools\WinUsbBinding.exe"
+                  Name="tools\WinUsbBinding.exe"
+                  InstallArguments="install"
+                  RepairArguments="install"
+                  UninstallArguments="remove"
+                  DetectCondition="HR7WinUsbInstalled AND NOT (HR7PreviousBundle004Installed OR HR7PreviousBundle005Installed OR HR7PreviousBundle006Installed OR HR7StrandedBundle007Installed OR HR7RecoveryBundle008Installed)"
+                  PerMachine="yes"
+                  Vital="yes">
+        <Payload Name="tools\libwdi.dll" SourceFile="$(var.PayloadRoot)\tools\libwdi.dll" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
+      <ExePackage Id="Hr7SaneService"
+                  DisplayName="Genius HR7 loopback SANE service"
+                  SourceFile="$(var.PayloadRoot)\tools\SaneServiceManager.exe"
+                  Name="tools\SaneServiceManager.exe"
+                  InstallArguments="install &quot;[HR7InstallFolder]&quot;"
+                  RepairArguments="install &quot;[HR7InstallFolder]&quot;"
+                  UninstallArguments="remove &quot;[HR7InstallFolder]&quot;"
+                  DetectCondition="HR7SaneServiceInstalled AND NOT (HR7PreviousBundle004Installed OR HR7PreviousBundle005Installed OR HR7PreviousBundle006Installed OR HR7StrandedBundle007Installed OR HR7RecoveryBundle008Installed)"
+                  PerMachine="yes"
+                  Vital="yes">
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+
       <ExePackage Id="Hr7TwainConfig"
                   DisplayName="SANEWinDS per-user configuration"
                   SourceFile="$(var.PayloadRoot)\tools\TwainConfigManager.exe"
@@ -133,18 +286,19 @@
                   InstallArguments="install &quot;[HR7InstallFolder]&quot;"
                   RepairArguments="install &quot;[HR7InstallFolder]&quot;"
                   UninstallArguments="remove &quot;[HR7InstallFolder]&quot;"
-                  DetectCondition="HR7TwainConfigInstalled"
+                  DetectCondition="HR7TwainConfigInstalled AND NOT (HR7PreviousBundle004Installed OR HR7PreviousBundle005Installed OR HR7PreviousBundle006Installed OR HR7StrandedBundle007Installed OR HR7RecoveryBundle008Installed)"
                   PerMachine="yes"
                   Vital="yes" />
 
       <ExePackage Id="Hr7WiaDevice"
                   DisplayName="Genius ColorPage-HR7 WIA 2.0 device"
+                  CacheId="HR7WiaDevice_1_0_0_10"
                   SourceFile="$(var.PayloadRoot)\tools\InstallHr7WiaDevice.exe"
                   Name="tools\InstallHr7WiaDevice.exe"
                   InstallArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
                   RepairArguments="install &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
                   UninstallArguments="remove &quot;[HR7InstallFolder]\WIA\GeniusColorPageHR7Wia.inf&quot;"
-                  DetectCondition="HR7WiaInstalled"
+                  DetectCondition="HR7WiaInstalled AND NOT (HR7PreviousBundle004Installed OR HR7PreviousBundle005Installed OR HR7PreviousBundle006Installed OR HR7StrandedBundle007Installed OR HR7RecoveryBundle008Installed)"
                   PerMachine="yes"
                   Vital="yes">
         <ExitCode Value="3010" Behavior="scheduleReboot" />

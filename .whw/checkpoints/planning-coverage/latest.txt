@@ -1,7 +1,7 @@
-# whw gate planning-coverage — 2026-09-20T115510Z (20260920T115510Z)
-[115510Z] PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-001-api-feasibility.todos.sql: 5 refs applied
-[115510Z] PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-002-windows-scan-apis.todos.sql: 5 refs applied
-[115510Z] PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-003-gui-installer.todos.sql: 5 refs applied
-[115510Z] PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-004-clean-pc-release.todos.sql: 5 refs applied
-[115510Z] PASS all wave todos reference an ADR
+# whw gate planning-coverage
+PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-001-api-feasibility.todos.sql: 5 refs applied
+PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-002-windows-scan-apis.todos.sql: 5 refs applied
+PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-003-gui-installer.todos.sql: 5 refs applied
+PASS C:\Users\eloi\Downloads\Genius-ColorPage-HR7-SANE\planning\wave-004-clean-pc-release.todos.sql: 5 refs applied
+PASS all wave todos reference an ADR
 status=GO failures=0

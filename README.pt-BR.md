@@ -14,6 +14,8 @@ O pacote não contém nem instala o driver proprietário antigo do scanner. Esse
 
 ## Windows 10/11 x64
 
+O fluxo manual abaixo é o caminho SANE legado para testes controlados; ele ainda exige PowerShell e Zadig e não é o instalador GUI sem scripts. Para o pacote GUI privado de avaliação, consulte [o status do instalador](Windows/Installer/README.md).
+
 Abra PowerShell como administrador, entre na pasta Windows deste pacote e execute:
 
     Set-ExecutionPolicy -Scope Process Bypass
@@ -83,7 +85,7 @@ Por padrão, isso remove somente configurações, lançador e logs locais. Use -
 
 ## Limitações conhecidas
 
-- O pacote atualmente instalado ainda é uma configuração de avaliação/desenvolvimento e exige associação manual do driver. A aquisição TWAIN está verificada em clientes x86/x64 para prévia Gray por transferência native e memory, e em x64 para página inteira Color native. O proprietário informa que o NAPS2 listou o scanner e concluiu uma digitalização completa com o instalador completo assinado 1.0.0.4, mas a API de aquisição usada não foi registrada. O novo pacote de migração 1.0.0.5 e o minidriver WIA foram compilados no Windows 10; esse candidato ainda não foi instalado nem testado em digitalização, e o certificado privado de avaliação ainda não é confiável pelo Windows. A enumeração WIA continua ausente após a instalação completa 1.0.0.4, portanto a compatibilidade exclusiva com WIA ainda não foi comprovada. O projeto ainda não atende ao objetivo de instalação para usuário final. Acompanhe a migração, assinatura, WIA, licenças e testes em máquina limpa em [Windows/Installer/README.md](Windows/Installer/README.md); não distribua o pacote atual como instalador pronto.
+- O host de teste Windows 10 22H2 está com o pacote privado de avaliação 1.0.0.10 instalado. O proprietário informou que aquisições completas no NAPS2 passaram por WIA e TWAIN antes da limpeza. Depois, o pacote 1.0.0.8 e os pacotes WIA antigos do Driver Store foram removidos, e o 1.0.0.10 foi reparado. Após a limpeza, a enumeração WIA passou, o dispositivo USB permaneceu OK no WinUSB e o serviço SANE local continuou ativo; aquisições completas não foram repetidas. A instalação e os testes no Windows 11 ainda estão pendentes. O certificado é de avaliação e cria confiança somente local, não é certificação pública; o pacote não foi aprovado para distribuição ampla. Consulte [o status do instalador](Windows/Installer/README.md).
 - A associação WinUSB é experimental e reversível, porém depende do estado do Driver Store do computador.
 - XSane 0.999 é uma interface gráfica legada; ela é usada aqui porque funciona com SANE no Cygwin/X. O backend e o ID USB continuam fixados no runtime privado.
 - Em 17/09/2026, testes físicos no Windows capturaram uma página de teste HP em 75 dpi e uma página inteira em 150 dpi pela instalação padrão SANE 1.4.0 com pthread. As imagens contêm texto e ilustrações reconhecíveis; o usuário confirmou deslocamento completo e retorno suave do carro. XSane e o macOS não foram testados fisicamente aqui. O diagnóstico e os logs estão registrados em Windows/DIAGNOSTIC-STATUS-20260916.md.

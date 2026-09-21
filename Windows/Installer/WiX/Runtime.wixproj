@@ -3,7 +3,7 @@
     <OutputType>Package</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
     <OutputName>GeniusColorPageHR7Runtime</OutputName>
-    <MsiVersion Condition="'$(MsiVersion)' == ''">1.0.5</MsiVersion>
+    <MsiVersion Condition="'$(MsiVersion)' == ''">1.0.10</MsiVersion>
     <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\..\build\payload</PayloadRoot>
     <OutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\Runtime\</OutputPath>
     <IntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix\obj\Runtime\</IntermediateOutputPath>

@@ -4,7 +4,9 @@
 #include <strsafe.h>
 #include <shellapi.h>
 
+#include <cwctype>
 #include <cwchar>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -20,7 +22,8 @@ namespace
     const wchar_t kGeneratedInstanceName[] = L"GENIUSCOLORPAGEHR7WIA";
     const wchar_t kDeviceName[] = L"Genius ColorPage-HR7 (WIA 2.0)";
     const wchar_t kInfFileName[] = L"GeniusColorPageHR7Wia.inf";
-    const wchar_t kPackageVersion[] = L"1.0.0.5";
+    const wchar_t kPackageVersion[] = L"1.0.0.10";
+    const wchar_t kDriverProvider[] = L"Genius ColorPage-HR7 project";
     const wchar_t kRegistryPath[] = L"SOFTWARE\\Genius\\ColorPage-HR7\\WIA";
     const wchar_t kVersionValue[] = L"InstalledVersion";
 
@@ -75,6 +78,96 @@ namespace
             return false;
         }
         *instanceId = buffer.data();
+        return true;
+    }
+
+    bool GetDriverRegistryString(HDEVINFO set, SP_DEVINFO_DATA *device,
+                                 const wchar_t *valueName, std::wstring *value)
+    {
+        HKEY key = SetupDiOpenDevRegKey(set, device, DICS_FLAG_GLOBAL, 0,
+            DIREG_DRV, KEY_QUERY_VALUE);
+        if (key == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        DWORD type = 0;
+        DWORD byteCount = 0;
+        LONG status = RegQueryValueExW(key, valueName, NULL, &type, NULL, &byteCount);
+        if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) ||
+            byteCount < sizeof(wchar_t) || byteCount % sizeof(wchar_t) != 0)
+        {
+            RegCloseKey(key);
+            SetLastError(status == ERROR_SUCCESS ? ERROR_INVALID_DATA : static_cast<DWORD>(status));
+            return false;
+        }
+
+        std::vector<wchar_t> buffer(byteCount / sizeof(wchar_t) + 1, L'\0');
+        status = RegQueryValueExW(key, valueName, NULL, &type,
+            reinterpret_cast<LPBYTE>(buffer.data()), &byteCount);
+        RegCloseKey(key);
+        if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ))
+        {
+            SetLastError(status == ERROR_SUCCESS ? ERROR_INVALID_DATA : static_cast<DWORD>(status));
+            return false;
+        }
+
+        *value = buffer.data();
+        return true;
+    }
+
+    bool ParseFourPartVersion(const std::wstring &text, unsigned long parts[4])
+    {
+        const wchar_t *cursor = text.c_str();
+        for (size_t index = 0; index < 4; ++index)
+        {
+            if (*cursor < L'0' || *cursor > L'9')
+            {
+                return false;
+            }
+            wchar_t *end = NULL;
+            unsigned long part = wcstoul(cursor, &end, 10);
+            if (end == cursor)
+            {
+                return false;
+            }
+            parts[index] = part;
+            if (index == 3)
+            {
+                return *end == L'\0';
+            }
+            if (*end != L'.')
+            {
+                return false;
+            }
+            cursor = end + 1;
+        }
+        return false;
+    }
+
+    bool IsHr7DriverAtLeastPackageVersion(HDEVINFO set, SP_DEVINFO_DATA *device)
+    {
+        std::wstring provider;
+        std::wstring version;
+        if (!GetDriverRegistryString(set, device, L"ProviderName", &provider) ||
+            _wcsicmp(provider.c_str(), kDriverProvider) != 0 ||
+            !GetDriverRegistryString(set, device, L"DriverVersion", &version))
+        {
+            return false;
+        }
+
+        unsigned long installedParts[4] = {};
+        unsigned long packageParts[4] = {};
+        if (!ParseFourPartVersion(version, installedParts) ||
+            !ParseFourPartVersion(kPackageVersion, packageParts))
+        {
+            return false;
+        }
+        for (size_t index = 0; index < 4; ++index)
+        {
+            if (installedParts[index] > packageParts[index]) return true;
+            if (installedParts[index] < packageParts[index]) return false;
+        }
         return true;
     }
 
@@ -326,6 +419,16 @@ namespace
             INSTALLFLAG_FORCE, &updateReboot))
         {
             DWORD updateError = GetLastError();
+            // SetupAPI returns ERROR_NO_MORE_ITEMS when the exact same
+            // package is already active and therefore has no better match.
+            // Treat that as idempotent success only after verifying the
+            // registered HR7 device is using this provider at this version
+            // or newer; unrelated failures still roll back as before.
+            if (updateError == ERROR_NO_MORE_ITEMS && devices.size() == 1 &&
+                IsHr7DriverAtLeastPackageVersion(current.handle, &devices[0]))
+            {
+                return true;
+            }
             if (created)
             {
                 DeviceInfoSet registered(SetupDiGetClassDevsW(&kImageClass, NULL, NULL, 0));

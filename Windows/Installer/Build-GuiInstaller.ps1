@@ -13,11 +13,20 @@ param(
     [ValidatePattern('^[0-9A-Fa-f]{40}$')]
     [string] $SigningCertificateThumbprint,
 
-    [string] $BundleVersion = '1.0.0.5',
-    [string] $RuntimeMsiVersion = '1.0.5',
+    [string] $BundleVersion = '1.0.0.10',
+    [string] $RuntimeMsiVersion = '1.0.10',
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
     [string] $PreviousBundlePath,
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $IntermediateBundlePath,
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $LegacyBundlePath,
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $StrandedBundlePath,
     [string] $SaneWinDsPackageRoot,
     [string] $SignToolPath,
     [string] $Inf2CatPath,
@@ -81,6 +90,88 @@ public static class Hr7MsiSummaryInterop {
     public static extern uint CloseHandle(uint handle);
 }
 '@ -ErrorAction Stop
+}
+
+function Initialize-MsiStorageInterop {
+    if ('Hr7MsiStorageInterop' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport, Guid("0000000B-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface Hr7MsiIStorage {
+    [PreserveSig] int CreateStream([MarshalAs(UnmanagedType.LPWStr)] string name, uint mode, uint reserved1, uint reserved2, IntPtr stream);
+    [PreserveSig] int OpenStream([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr reserved, uint mode, uint reserved2, IntPtr stream);
+    [PreserveSig] int CreateStorage([MarshalAs(UnmanagedType.LPWStr)] string name, uint mode, uint reserved1, uint reserved2, IntPtr storage);
+    [PreserveSig] int OpenStorage([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr priority, uint mode, IntPtr exclude, uint reserved, IntPtr storage);
+    [PreserveSig] int CopyTo(uint count, IntPtr excludedIids, IntPtr excludedNames, IntPtr destination);
+    [PreserveSig] int MoveElementTo([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr destination, uint flags, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+    [PreserveSig] int Commit(uint flags);
+    [PreserveSig] int Revert();
+    [PreserveSig] int EnumElements(uint reserved1, IntPtr reserved2, IntPtr reserved3, IntPtr enumerator);
+    [PreserveSig] int DestroyElement([MarshalAs(UnmanagedType.LPWStr)] string name);
+    [PreserveSig] int RenameElement([MarshalAs(UnmanagedType.LPWStr)] string oldName, [MarshalAs(UnmanagedType.LPWStr)] string newName);
+    [PreserveSig] int SetElementTimes([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr createTime, IntPtr accessTime, IntPtr modifyTime);
+    [PreserveSig] int SetClass(ref Guid classId);
+    [PreserveSig] int SetStateBits(uint stateBits, uint mask);
+    [PreserveSig] int Stat(out System.Runtime.InteropServices.ComTypes.STATSTG stat, uint flags);
+}
+
+public static class Hr7MsiStorageInterop {
+    [DllImport("ole32.dll", CharSet=CharSet.Unicode, EntryPoint="StgOpenStorage", ExactSpelling=true)]
+    private static extern int OpenStorage(string path, IntPtr priority, uint mode, IntPtr exclude, uint reserved, out Hr7MsiIStorage storage);
+
+    public static long GetRootModifiedTime(string path) {
+        Hr7MsiIStorage storage = null;
+        int result = OpenStorage(path, IntPtr.Zero, 0x10, IntPtr.Zero, 0, out storage);
+        if (result < 0) Marshal.ThrowExceptionForHR(result);
+        try {
+            System.Runtime.InteropServices.ComTypes.STATSTG stat;
+            result = storage.Stat(out stat, 1);
+            if (result < 0) Marshal.ThrowExceptionForHR(result);
+            ulong ticks = ((ulong)(uint)stat.mtime.dwHighDateTime << 32) | (uint)stat.mtime.dwLowDateTime;
+            return unchecked((long)ticks);
+        } finally {
+            if (storage != null) Marshal.ReleaseComObject(storage);
+        }
+    }
+
+    public static void SetRootModifiedTime(string path, long ticks) {
+        Hr7MsiIStorage storage = null;
+        int result = OpenStorage(path, IntPtr.Zero, 0x12, IntPtr.Zero, 0, out storage);
+        if (result < 0) Marshal.ThrowExceptionForHR(result);
+        IntPtr fileTime = IntPtr.Zero;
+        try {
+            ulong value = unchecked((ulong)ticks);
+            System.Runtime.InteropServices.ComTypes.FILETIME modified = new System.Runtime.InteropServices.ComTypes.FILETIME {
+                dwLowDateTime = unchecked((int)(uint)value),
+                dwHighDateTime = unchecked((int)(uint)(value >> 32))
+            };
+            fileTime = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(System.Runtime.InteropServices.ComTypes.FILETIME)));
+            Marshal.StructureToPtr(modified, fileTime, false);
+            result = storage.SetElementTimes(null, IntPtr.Zero, IntPtr.Zero, fileTime);
+            if (result < 0) Marshal.ThrowExceptionForHR(result);
+            result = storage.Commit(0);
+            if (result < 0) Marshal.ThrowExceptionForHR(result);
+        } finally {
+            if (fileTime != IntPtr.Zero) Marshal.FreeHGlobal(fileTime);
+            if (storage != null) Marshal.ReleaseComObject(storage);
+        }
+    }
+}
+'@ -ErrorAction Stop
+}
+
+function Get-MsiRootModifiedTime {
+    param([string] $Path)
+    Initialize-MsiStorageInterop
+    return [Hr7MsiStorageInterop]::GetRootModifiedTime([IO.Path]::GetFullPath($Path))
+}
+
+function Set-MsiRootModifiedTime {
+    param([string] $Path, [long] $ModifiedTime)
+    Initialize-MsiStorageInterop
+    [Hr7MsiStorageInterop]::SetRootModifiedTime([IO.Path]::GetFullPath($Path), $ModifiedTime)
 }
 
 function Get-MsiSummaryString {
@@ -153,6 +244,11 @@ function Get-DeterministicPackageCode {
 
 function Repair-SaneWinDsX86Summary {
     param([string] $Path, [string] $PackageCode)
+    # MSI is a compound file. MsiDatabaseCommit updates the root storage's
+    # modified time, even when all summary property values are unchanged.
+    # Restore the pinned upstream timestamp so the repaired package hash is
+    # reproducible and Burn's package-cache hash stays stable across releases.
+    $originalRootModifiedTime = Get-MsiRootModifiedTime -Path $Path
     $originalTemplate = Get-MsiSummaryString -Path $Path -PropertyId 7
     if ($originalTemplate -cne ';1033') {
         throw "The pinned x86 SANEWinDS MSI no longer has the expected missing-platform Template Summary ';1033' (found '$originalTemplate'). Review the upstream package before continuing."
@@ -162,6 +258,7 @@ function Repair-SaneWinDsX86Summary {
         throw "The pinned x86 SANEWinDS MSI has an unexpected PackageCode: '$originalPackageCode'."
     }
     Set-MsiSummaryStrings -Path $Path -Template 'Intel;1033' -PackageCode $PackageCode
+    Set-MsiRootModifiedTime -Path $Path -ModifiedTime $originalRootModifiedTime
     $correctedTemplate = Get-MsiSummaryString -Path $Path -PropertyId 7
     $correctedPackageCode = Get-MsiSummaryString -Path $Path -PropertyId 9
     if ($correctedTemplate -cne 'Intel;1033' -or $correctedPackageCode -cne $PackageCode) {
@@ -172,6 +269,7 @@ function Repair-SaneWinDsX86Summary {
         corrected_template_summary = $correctedTemplate
         original_package_code = $originalPackageCode
         corrected_package_code = $correctedPackageCode
+        original_root_modified_time_filetime = [string]$originalRootModifiedTime
     }
 }
 
@@ -295,16 +393,16 @@ $version = [version]$BundleVersion
 if ($BundleVersion -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $version.Build -lt 0 -or $version.Revision -lt 0) {
     throw 'BundleVersion must have four numeric fields, for example 1.0.0.4.'
 }
-if ($BundleVersion -ne '1.0.0.5') {
-    throw 'This migration build is pinned to bundle 1.0.0.5 and the signed 1.0.0.4 predecessor. Update the migration artifact, helper/INF versions, and lifecycle tests together before changing it.'
+if ($BundleVersion -ne '1.0.0.10') {
+    throw 'This recovery build is pinned to bundle 1.0.0.10 and the signed 1.0.0.7/1.0.0.6/1.0.0.5/1.0.0.4 predecessors. Update migration artifacts, helper/INF versions, and lifecycle tests together before changing it.'
 }
 $msiVersion = [version]$RuntimeMsiVersion
 if ($RuntimeMsiVersion -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,3}$' -or
     $msiVersion.Major -gt 255 -or $msiVersion.Minor -gt 255 -or $msiVersion.Build -gt 65535) {
     throw 'RuntimeMsiVersion must be a valid three-field Windows Installer product version.'
 }
-if ($RuntimeMsiVersion -ne '1.0.5') {
-    throw 'The 1.0.0.5 migration must advance the runtime MSI from 1.0.0 to 1.0.5.'
+if ($RuntimeMsiVersion -ne '1.0.10') {
+    throw 'The 1.0.0.10 recovery must advance the runtime MSI from 1.0.9 to 1.0.10.'
 }
 if ($AllowUntrustedEvaluationSigning -and -not $AllowUnreleasedEvaluationBuild) {
     throw '-AllowUntrustedEvaluationSigning is permitted only together with -AllowUnreleasedEvaluationBuild for a private evaluation artifact.'
@@ -315,35 +413,62 @@ $windowsRoot = Join-Path $repoRoot 'Windows'
 $buildRoot = Join-Path $windowsRoot 'build'
 New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
 
-# The previous full Burn setup removed packages from its replacement because
-# Burn executes related-bundle upgrades after the current chain. Embed only the
-# exact released 1.0.0.4 bundle admitted by its build manifest and pinned digest.
-$previousBundleVersion = '1.0.0.4'
-$previousBundleExpectedSha256 = '97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c'
-$previousBundleExpectedSigner = '4E086470415F86AEAB2B55B06D5190B49C9ED2B7'
-$previousBundlePath = [IO.Path]::GetFullPath($PreviousBundlePath)
-if (-not (Test-Path -LiteralPath $previousBundlePath -PathType Leaf)) {
-    throw "The signed 1.0.0.4 migration bundle was not found: $previousBundlePath"
-}
-$previousBundleManifestPath = Join-Path (Split-Path -Parent $previousBundlePath) 'release-artifacts.json'
-if (-not (Test-Path -LiteralPath $previousBundleManifestPath -PathType Leaf)) {
-    throw "The predecessor release manifest is required beside the bundle: $previousBundleManifestPath"
-}
-$previousBundleManifest = Get-Content -LiteralPath $previousBundleManifestPath -Raw | ConvertFrom-Json
-if ([string]$previousBundleManifest.bundle_version -cne $previousBundleVersion -or
-    [string]$previousBundleManifest.bundle.sha256 -ine $previousBundleExpectedSha256 -or
-    [string]$previousBundleManifest.signing_certificate_thumbprint -ine $previousBundleExpectedSigner) {
-    throw 'The predecessor release manifest is not the pinned signed 1.0.0.4 release.'
-}
-$previousBundleActualSha256 = Get-Sha256 -Path $previousBundlePath
-if ($previousBundleActualSha256 -ine $previousBundleExpectedSha256) {
-    throw "The predecessor setup SHA-256 is not the pinned 1.0.0.4 release: $previousBundleActualSha256"
-}
-$previousBundleSignature = Get-AuthenticodeSignature -LiteralPath $previousBundlePath
-if ($previousBundleSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
-    -not $previousBundleSignature.SignerCertificate -or
-    $previousBundleSignature.SignerCertificate.Thumbprint -ine $previousBundleExpectedSigner) {
-    throw 'The predecessor setup must have a valid Authenticode signature from the pinned local-evaluation signer.'
+# Use exact signed prior bundles as generic executable uninstall payloads. This
+# avoids the outer Burn engine suppressing BundlePackage cleanup while preserving
+# its dependency protection for the shared SANEWinDS MSI providers. Each child
+# Burn invocation still receives related-upgrade semantics and runs between the
+# new SANEWinDS dependency registration and helper reinstall.
+$predecessorBundles = @(
+    [pscustomobject]@{
+        Version = '1.0.0.6'; Path = [IO.Path]::GetFullPath($PreviousBundlePath)
+        Sha256 = '59475398154caf87c3767b0a2c692f6a2e23e62fdf4d98dbe2bb353306571e62'
+        Signer = '1E5EAF5313805BC85012B350720715C3B3954EA3'; ActualSha256 = $null; StagedPath = $null
+        StageName = 'GeniusColorPageHR7Setup-1.0.0.6.exe'; PackageId = 'Hr7PreviousBundle'
+    },
+    [pscustomobject]@{
+        Version = '1.0.0.5'; Path = [IO.Path]::GetFullPath($IntermediateBundlePath)
+        Sha256 = '2af78e0ee8c9be8102e24dbf0a1193a1c3007ea79c0aedfa41417941914d15fb'
+        Signer = '1E5EAF5313805BC85012B350720715C3B3954EA3'; ActualSha256 = $null; StagedPath = $null
+        StageName = 'GeniusColorPageHR7Setup-1.0.0.5.exe'; PackageId = 'Hr7IntermediateBundle'
+    },
+    [pscustomobject]@{
+        Version = '1.0.0.4'; Path = [IO.Path]::GetFullPath($LegacyBundlePath)
+        Sha256 = '97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c'
+        Signer = '4E086470415F86AEAB2B55B06D5190B49C9ED2B7'; ActualSha256 = $null; StagedPath = $null
+        StageName = 'GeniusColorPageHR7Setup-1.0.0.4.exe'; PackageId = 'Hr7LegacyBundle'
+    },
+    [pscustomobject]@{
+        Version = '1.0.0.7'; Path = [IO.Path]::GetFullPath($StrandedBundlePath)
+        Sha256 = '7e96dcceaf591caf792e22cbc8d04141bad001d906d6603465fefe00a6ebf108'
+        Signer = '1E5EAF5313805BC85012B350720715C3B3954EA3'; ActualSha256 = $null; StagedPath = $null
+        StageName = 'GeniusColorPageHR7Setup-1.0.0.7.exe'; PackageId = 'Hr7StrandedBundle'
+    }
+)
+foreach ($predecessor in $predecessorBundles) {
+    if (-not (Test-Path -LiteralPath $predecessor.Path -PathType Leaf)) {
+        throw "The signed $($predecessor.Version) migration bundle was not found: $($predecessor.Path)"
+    }
+    $manifestPath = Join-Path (Split-Path -Parent $predecessor.Path) 'release-artifacts.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "The $($predecessor.Version) predecessor release manifest is required beside the bundle: $manifestPath"
+    }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ([string]$manifest.bundle_version -cne $predecessor.Version -or
+        [string]$manifest.bundle.sha256 -ine $predecessor.Sha256 -or
+        [string]$manifest.signing_certificate_thumbprint -ine $predecessor.Signer) {
+        throw "The predecessor release manifest is not the pinned signed $($predecessor.Version) release."
+    }
+    $actualSha256 = Get-Sha256 -Path $predecessor.Path
+    if ($actualSha256 -ine $predecessor.Sha256) {
+        throw "The $($predecessor.Version) setup SHA-256 does not match the pinned release: $actualSha256"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $predecessor.Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Thumbprint -ine $predecessor.Signer) {
+        throw "The $($predecessor.Version) predecessor setup must have a valid Authenticode signature from its pinned signer."
+    }
+    $predecessor.ActualSha256 = $actualSha256
 }
 
 $saneWinDsPackageSource = if ($SaneWinDsPackageRoot) {
@@ -469,10 +594,12 @@ $evaluationCertificateSha256 = Get-Sha256 -Path $evaluationCertificatePath
 foreach ($directoryName in @('runtime', 'WIA', 'config', 'Licenses', 'Documentation', 'tools', 'third-party', 'packages', 'migration')) {
     New-Item -ItemType Directory -Path (Join-Path $payloadRoot $directoryName) | Out-Null
 }
-$stagedPreviousBundlePath = Join-Path $payloadRoot 'migration\GeniusColorPageHR7Setup-1.0.0.4.exe'
-Copy-Item -LiteralPath $previousBundlePath -Destination $stagedPreviousBundlePath
-if ((Get-Sha256 -Path $stagedPreviousBundlePath) -ine $previousBundleExpectedSha256) {
-    throw 'The staged migration bundle changed during copy; refusing to create the Burn package.'
+foreach ($predecessor in $predecessorBundles) {
+    $predecessor.StagedPath = Join-Path $payloadRoot ('migration\' + $predecessor.StageName)
+    Copy-Item -LiteralPath $predecessor.Path -Destination $predecessor.StagedPath
+    if ((Get-Sha256 -Path $predecessor.StagedPath) -ine $predecessor.Sha256) {
+        throw "The staged $($predecessor.Version) migration bundle changed during copy; refusing to create the Burn package."
+    }
 }
 
 Copy-TreeContents -Source $runtimeSource -Destination (Join-Path $payloadRoot 'runtime')
@@ -718,7 +845,10 @@ Invoke-Checked -FilePath $dotnet -Arguments @(
     'build', $bundleWixProject, '-c', 'Release', '-t:Rebuild',
     "-p:PayloadRoot=$payloadRoot",
     "-p:RuntimeMsiPath=$runtimeCopy",
-    "-p:PreviousBundlePath=$stagedPreviousBundlePath",
+    "-p:PreviousBundlePath=$($predecessorBundles[0].StagedPath)",
+    "-p:IntermediateBundlePath=$($predecessorBundles[1].StagedPath)",
+    "-p:LegacyBundlePath=$($predecessorBundles[2].StagedPath)",
+    "-p:StrandedBundlePath=$($predecessorBundles[3].StagedPath)",
     "-p:OutputPath=$bundleWixOutput\",
     "-p:IntermediateOutputPath=$bundleWixIntermediate\",
     "-p:BundleVersion=$BundleVersion"
@@ -737,9 +867,14 @@ $expectedBundlePayloads = @(
     (Join-Path $payloadRoot 'third-party\SANEWinDS_1.6.9221_x86.msi'),
     (Join-Path $payloadRoot 'third-party\SANEWinDS_1.6.9221_x64.msi'),
     (Join-Path $payloadRoot 'tools\TwainConfigManager.exe'),
-    (Join-Path $payloadRoot 'tools\InstallHr7WiaDevice.exe'),
-    $stagedPreviousBundlePath
+    (Join-Path $payloadRoot 'tools\InstallHr7WiaDevice.exe')
 )
+# Every WIA preparation instance is a separate Burn package so it can be
+# sequenced between legacy removals; account for its unique copied payload name.
+for ($wiaPreparation = 0; $wiaPreparation -lt 4; $wiaPreparation++) {
+    $expectedBundlePayloads += (Join-Path $payloadRoot 'tools\InstallHr7WiaDevice.exe')
+}
+$expectedBundlePayloads += @($predecessorBundles | ForEach-Object { $_.StagedPath })
 $expectedBundleHashes = @($expectedBundlePayloads | ForEach-Object {
     if (-not (Test-Path -LiteralPath $_ -PathType Leaf)) { throw "Expected Burn payload is missing: $_" }
     Get-Sha256 -Path $_
@@ -776,15 +911,17 @@ $releaseRecord = [ordered]@{
     bundle_version = $BundleVersion
     msi_version = $RuntimeMsiVersion
     bundle = [ordered]@{ path = $finalBundle; sha256 = (Get-Sha256 $finalBundle) }
-    previous_bundle = [ordered]@{
-        version = $previousBundleVersion
-        path = $previousBundlePath
-        sha256 = $previousBundleActualSha256
-        signing_certificate_thumbprint = $previousBundleExpectedSigner
-        embedded_in_bundle = $true
-        chain_position = 1
-        behavior = 'uninstalled before the current runtime and provider helpers; detect-only related-bundle registration prevents duplicate late uninstall'
-    }
+    predecessor_bundles = @($predecessorBundles | ForEach-Object {
+        [ordered]@{
+            version = $_.Version
+            path = $_.Path
+            sha256 = $_.ActualSha256
+            signing_certificate_thumbprint = $_.Signer
+            embedded_in_bundle = $true
+            chain_position = 5 + (2 * [array]::IndexOf($predecessorBundles, $_))
+            behavior = 'invoked as a vital generic EXE uninstall after WIA is re-staged for that predecessor and before current helper reinstall'
+        }
+    })
     runtime_msi = [ordered]@{ path = $runtimeCopy; sha256 = (Get-Sha256 $runtimeCopy); embedded_in_bundle = $true }
     bundle_payload_verification = [ordered]@{
         extracted_attachment_count = $actualBundleHashes.Count

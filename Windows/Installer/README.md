@@ -8,7 +8,7 @@ WIA 2.0 software-device package. Apps that support neither WIA nor TWAIN are
 outside the compatibility scope.
 
 The bundle is self-contained: the runtime MSI, both pinned SANEWinDS MSIs, and
-the exact supported predecessor bundle are embedded in the setup EXE, so
+the exact supported predecessor bundles are embedded in the setup EXE, so
 end-user installation does not need GitHub or SourceForge access. Maintainer
 builds take the SANEWinDS packages from the hash-checked `.tools/downloads`
 cache (or fetch the pinned HTTPS URLs when the cache is absent). The upstream
@@ -16,19 +16,25 @@ x86 MSI omits its platform in Template Summary; the build changes only the
 staged copy to `Intel;1033`, assigns it a stable new PackageCode, and records
 the original and packaged hashes in `release-artifacts.json`.
 
-The 1.0.0.5 migration includes the signed 1.0.0.4 setup as the first Burn chain
-package, with an uninstall-only condition. The older bundle is also declared
-detect-only; this prevents Burn's normal late related-bundle upgrade removal
-from running after the new provider helpers have been installed. The old
-bundle's version, SHA-256, and signer are pinned and checked against its
-`release-artifacts.json` before staging. Burn rollback is enabled, but the
-removed predecessor's restoration after a later package failure has not yet
-been exercised and remains a lifecycle-test requirement. The MSI version
-advances independently to 1.0.5 so the changed WIA payload is not mistaken for
-the already-installed 1.0.0 MSI.
-This intentionally makes the migration EXE larger (the predecessor is about
-46 MB); future installer updates must repeat a tested uninstall-first handoff
-for their supported predecessor or provide an equally safe migration design.
+The 1.0.0.8 Windows 10 migration attempt exposed a cleanup-order bug. Its log
+shows that removing 1.0.0.6 first removed the shared runtime directory and WIA
+INF; the subsequent 1.0.0.5 uninstaller then failed with `ERROR_INVALID_NAME`
+while trying to remove its WIA package. Burn rolled back the predecessor
+uninstalls. The WinUSB binding helper itself returned success, and the physical
+scanner remained on WinUSB.
+
+The 1.0.0.10 recovery chain registers the SANEWinDS dependencies, installs the
+current runtime MSI so a valid WIA INF remains at the shared path, then
+re-stages the current WIA driver before each pinned 1.0.0.6, 1.0.0.5, 1.0.0.4,
+and 1.0.0.7 cleanup bundle (with .7 last). This matters because each historical
+uninstaller can remove the staged WIA package. It reinstalls the current
+WinUSB, service, TWAIN, and WIA helpers after all cleanup. The partial 1.0.0.8
+bundle is detected to force that helper refresh, but is not
+recursively uninstalled; this avoids re-entering its own failing migration
+chain and keeps the offline installer from embedding another 734 MB setup.
+Predecessor hashes/signers are pinned and checked against their release
+manifests before staging. The runtime MSI and WIA helper/INF advance to 1.0.10
+and 1.0.0.10, respectively.
 
 WinUSB is changed only for USB `0458:2013`. If that device already uses
 WinUSB, setup records that existing binding as unowned and leaves it alone.
@@ -47,8 +53,9 @@ keeps later user edits alongside the hidden backup.
   WIA headers/libraries, `Inf2Cat.exe`, and `SignTool.exe`.
 - WiX Toolset 5.0.2 (`wix.exe` and the matching SDK packages).
 - A current Authenticode code-signing certificate with its private key.
-- The exact signed 1.0.0.4 bundle and its adjacent `release-artifacts.json`
-  manifest, as `PreviousBundlePath`.
+- The exact signed 1.0.0.6, 1.0.0.5, 1.0.0.4, and 1.0.0.7 bundles with their
+  adjacent release manifests, as `PreviousBundlePath`, `IntermediateBundlePath`,
+  `LegacyBundlePath`, and `StrandedBundlePath`.
 - A trimmed, redistributable SANE/Cygwin runtime tree supplied as
   `RuntimeRoot`; it must contain the service binaries/configuration and no
   compiler, development headers, import/static libraries, or debug artifacts.
@@ -65,18 +72,21 @@ Example maintainer invocation:
   -LibwdiRoot 'C:\staging\libwdi-1.5.1' `
   -ComplianceRoot 'C:\staging\hr7-compliance' `
   -SigningCertificateThumbprint 'REPLACE_WITH_40_HEX_DIGIT_THUMBPRINT' `
-  -RuntimeMsiVersion '1.0.5' `
-  -PreviousBundlePath 'C:\staging\release-1.0.0.4\GeniusColorPageHR7Setup.exe'
+  -RuntimeMsiVersion '1.0.10' `
+  -PreviousBundlePath 'C:\staging\release-1.0.0.6\GeniusColorPageHR7Setup.exe' `
+  -IntermediateBundlePath 'C:\staging\release-1.0.0.5\GeniusColorPageHR7Setup.exe' `
+  -LegacyBundlePath 'C:\staging\release-1.0.0.4\GeniusColorPageHR7Setup.exe' `
+  -StrandedBundlePath 'C:\staging\release-1.0.0.7\GeniusColorPageHR7Setup.exe'
 ```
 
 Private evaluation builds may omit the approval file only with
 `-AllowUnreleasedEvaluationBuild`; that output is explicitly marked evaluation
-only. The migration source pins the bundle and WIA helper/INF to `1.0.0.5`,
-the runtime MSI to `1.0.5`, and the predecessor input to the signed `1.0.0.4`
-artifact. Build outputs and intermediate files stay under the ignored
+only. The recovery source pins the bundle and WIA helper/INF to `1.0.0.10`,
+the runtime MSI to `1.0.10`, and predecessor inputs to the signed `1.0.0.6`,
+`1.0.0.5`, `1.0.0.4`, and `1.0.0.7` artifacts. Build outputs and intermediate files stay under the ignored
 `Windows/build/` directory. Each run gets unique output, native-helper, WIA,
 WiX, and staged-libwdi paths so previous files are preserved rather than
-overwritten. The `release-artifacts.json` file records all nine Burn attachment
+overwritten. The `release-artifacts.json` file records all Burn attachment
 hashes, predecessor provenance, and an exported public signing-certificate
 sidecar. That `.cer` contains no private key. On each evaluation PC that must
 validate or run this private build (the Windows 10 build/test PC first, then
@@ -153,24 +163,71 @@ full-bundle installation. This is consistent with the observed Burn defect:
 the prior related-bundle uninstall ran after the new chain and removed the WIA
 helper registration. Do not treat the NAPS2 result as WIA-specific evidence.
 
-The 1.0.0.5 setup has now been built on Windows 10 as a private local-evaluation
-artifact at
-`Windows/build/release-1.0.0.5-179e96db4ac74cdb8b3d5e8b6b78587a/`. Its
-SHA-256 is
-`b2a1b1ceb24ead3e1732a112fb085d898c7323bf2b8fddca4d837f8513d2d7fa` and it is
-92,234,152 bytes. MSBuild compiled all helpers and the WIA provider, Inf2Cat
-reported no errors or warnings, WiX 5.0.2 completed with zero warnings/errors,
-and Burn extraction verified nine attachment hashes. The MSI database reports
-ProductVersion `1.0.5`; the embedded predecessor hash is
-`97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c`. Its
-manifest records the local signer thumbprint and public `.cer` sidecar.
+The 1.0.0.5 local-evaluation setup was installed on Windows 10. The device
+remains OK on WinUSB, the loopback SANE service is running, and the WIA software
+device enumerates. However, both the 1.0.0.4 and 1.0.0.5 bundles remain in
+Programs and Features: Burn's log shows the ordinary predecessor uninstall was
+blocked by dependency protection.
 
-This candidate is **not install-ready yet**: Windows reports Authenticode
-`UnknownError` because the new signer is not yet trusted in this PC's Local
-Machine root/publisher stores. The non-exportable private key remains in the
-builder's certificate store; the public sidecar has no private key. After
-local trust is configured, rebuild or re-verify it, then install and test the
-1.0.0.4-to-1.0.0.5 migration, WIA enumeration/acquisition, TWAIN x86/x64,
-rollback, repair, uninstall, and loopback-only service before Windows 11
-deployment. Public distribution still needs third-party redistribution review
-and a signing path accepted by arbitrary Windows machines.
+The replacement private-evaluation setup is
+`Windows/build/release-1.0.0.6-66b3f3d9f5744b66ae65c0c4a684deca/`. It is
+183,862,624 bytes with SHA-256
+`59475398154caf87c3767b0a2c692f6a2e23e62fdf4d98dbe2bb353306571e62`, and its
+Authenticode signature validates under the locally trusted signer
+(`1E5EAF5313805BC85012B350720715C3B3954EA3`). MSBuild compiled the helpers and
+WIA provider, Inf2Cat reported no errors or warnings, WiX 5.0.2 completed with
+zero warnings/errors, and Burn extraction verified all 10 attachment hashes.
+The manifest pins both predecessors: 1.0.0.5
+(`2af78e0ee8c9be8102e24dbf0a1193a1c3007ea79c0aedfa41417941914d15fb`) and
+1.0.0.4
+(`97ea116ea5063ef2c23188440d07c87890d7f53372f3a8c0c5edf194cd683e8c`). The
+WDK NuGet tool package used for Inf2Cat passed NuGet author/repository
+signature verification.
+
+The 1.0.0.6 machine-wide install attempt stopped at UAC and was canceled before
+setup launched; no Burn log was created and no driver/package state changed.
+The certificate is trusted on this test PC in Local Machine Root and Trusted
+Publishers, but this is local evaluation trust only. After administrator
+consent, verify migration order and dependency preservation, WIA enumeration
+and acquisition, TWAIN x86/x64, a full physical scan, repair, rollback,
+uninstall, and loopback-only service before Windows 11 deployment. Public
+distribution still needs third-party redistribution review and a signing path
+accepted by arbitrary Windows machines.
+
+## Windows 10 cleanup and repair check (2026-09-21)
+
+After the owner reported 100% WIA/TWAIN acquisition success through NAPS2 on
+1.0.0.10, the remaining 1.0.0.8 bundle was removed from the Windows 10 test
+machine. Its first uninstall attempt had stopped because 1.0.0.10 had already
+removed the shared WIA INF. Restoring 1.0.0.10 then briefly rolled back: the
+SetupAPI log says the active 1.0.0.10 WIA driver was not better than the
+specified same-version package (`ERROR_NO_MORE_ITEMS`), while Burn recorded
+helper exit 31. This is a maintenance edge case when the partial 1.0.0.8
+registration forces the WIA helper to run again; it is not evidence of a USB
+binding or scanner hardware failure.
+
+With the 1.0.0.10 INF present, the signed cached 1.0.0.8 uninstaller completed
+with exit 0. Its helper cleanup removed the old bundle registration and the
+shared WIA/TWAIN/service helper markers. The physical `0458:2013` scanner
+remained `OK` on its pre-existing, unowned WinUSB binding (`oem91.inf`). Repair
+of the registered 1.0.0.10 bundle completed with exit 0 and restored the WIA
+device. Post-repair checks show: 1.0.0.8 absent from Programs and Features;
+1.0.0.10 and its runtime registered; WIA.DeviceManager enumerates `Genius
+ColorPage-HR7 (WIA 2.0)`; the loopback SANE service is running; and the physical
+USB binding remains WinUSB. The TWAIN enumeration harness printed `PASS` but
+hung while closing the DSM; it did not scan. No post-repair acquisition was run,
+so the NAPS2 acquisition result above is owner-reported evidence from before
+this cleanup/repair sequence.
+
+An elevated, non-forced PnPUtil cleanup then removed the five older WIA
+packages `oem88.inf`, `oem89.inf`, `oem90.inf`, `oem92.inf`, and `oem97.inf`
+(versions 1.0.0.1/.2/.3/.5/.9). Only the active `oem98.inf` 1.0.0.10 WIA
+package remains staged. Afterward, WIA enumeration passed, the physical scanner
+remained `OK` on WinUSB `oem91.inf`, and the SANE service remained running. No
+`/force` was used, and no WIA/TWAIN acquisition was repeated after this cleanup.
+
+The Windows 11 test remains pending. Transfer the signed setup and its
+evaluation `.cer` sidecar to that PC, trust the certificate there in Local
+Computer Root and Trusted Publishers, then run NAPS2 WIA and TWAIN acquisitions.
+The certificate is local evaluation trust only; this bundle is not approved
+for public distribution.
